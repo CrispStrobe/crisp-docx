@@ -14,6 +14,7 @@ Primitives implemented (one-to-one with PARITY.md rows):
 
 from __future__ import annotations
 
+import argparse
 import json
 import shutil
 import sys
@@ -125,6 +126,41 @@ def main() -> int:
             for n, b in parts.items():
                 zout.writestr(n, b)
         _emit({"removed": removed_total})
+        return 0
+
+    if primitive == "check":
+        # Run debug_format.cmd_check on the source, capture (issue_count,
+        # ok_count) by running the function via a captured argparse-style
+        # call. cmd_check writes to stdout/stderr; we want to count its
+        # "FAIL" and "OK" lines without depending on internal data
+        # structures, since they're not exposed as a return value.
+        import io
+        import contextlib
+
+        # No copy needed — check is read-only.
+        from debug_format import cmd_check  # type: ignore
+
+        ns = argparse.Namespace(doc=str(src_path))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            rc = cmd_check(ns)
+        text = buf.getvalue()
+        issues = [
+            ln.strip()
+            for ln in text.splitlines()
+            if ln.lstrip().startswith("FAIL")
+        ]
+        oks = [
+            ln.strip()
+            for ln in text.splitlines()
+            if ln.lstrip().startswith("OK")
+        ]
+        _emit({
+            "rc": int(rc),
+            "issue_count": len(issues),
+            "ok_count": len(oks),
+            "issues": [i[5:].strip() if i.startswith("FAIL") else i for i in issues],
+        })
         return 0
 
     print(f"unknown primitive: {primitive}", file=sys.stderr)

@@ -19,11 +19,11 @@ use pyo3::prelude::*;
 
 use crisp_docx_core::{
     analyze_blueprint as core_analyze, apply_heading_inferences as core_apply_inferences,
-    apply_style_mapping as core_apply_styles, convert_notes_kind as core_convert,
-    infer_heading_levels as core_infer, inject_footnotes as core_inject,
-    normalize_tags as core_normalize, open, save, strip_paragraph_bold as core_unbold,
-    strip_rsids as core_strip, transplant_body as core_transplant, NotesKind, StyleIndex,
-    StyleMapper,
+    apply_style_mapping as core_apply_styles, check_package as core_check,
+    convert_notes_kind as core_convert, infer_heading_levels as core_infer,
+    inject_footnotes as core_inject, normalize_tags as core_normalize, open, save,
+    strip_paragraph_bold as core_unbold, strip_rsids as core_strip,
+    transplant_body as core_transplant, NotesKind, StyleIndex, StyleMapper,
 };
 
 #[pyclass(eq, eq_int)]
@@ -296,6 +296,19 @@ fn infer_heading_levels(
         .collect())
 }
 
+/// Run cmd_check-equivalent validity checks on a docx. Returns a tuple
+/// `(is_clean: bool, oks: List[str], issues: List[str])`.
+///
+/// Equivalent to `debug_format.py::cmd_check` minus the stdout printing:
+/// XML parse, rsid/paraId consistency, rel targets, body structure,
+/// bookmark IDs, inline rId references.
+#[pyfunction]
+fn check_package(path: PathBuf) -> PyResult<(bool, Vec<String>, Vec<String>)> {
+    let pkg = open(&path).map_err(map_err)?;
+    let r = core_check(&pkg).map_err(map_err)?;
+    Ok((r.is_clean(), r.ok, r.issues))
+}
+
 /// `crisp_docx` Python module.
 #[pymodule]
 fn crisp_docx(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -311,5 +324,6 @@ fn crisp_docx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(analyze_blueprint, m)?)?;
     m.add_function(wrap_pyfunction!(apply_style_mapping, m)?)?;
     m.add_function(wrap_pyfunction!(infer_heading_levels, m)?)?;
+    m.add_function(wrap_pyfunction!(check_package, m)?)?;
     Ok(())
 }

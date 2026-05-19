@@ -79,7 +79,7 @@ in PLAN.md.
 | Python subcommand | Lines | Rust equivalent | Status | Parity criterion |
 |---|---|---|---|---|
 | `cmd_inspect(args)` | 951:200 | CLI `crisp-docx inspect` | 🟡 | Output is human-readable; criterion is "same set of parts and sizes reported." Different formatting is allowed. |
-| `cmd_check(args)` | 951:270 | ⏳ | ⏳ | XML well-formedness + rsid/paraId/rel/bookmark/rId consistency checks. Big function (160 lines); will need a phased port. |
+| `cmd_check(args)` | 951:270 | `check_package(pkg) -> CheckReport` | ✅ | All 7 sub-checks ported (XML parse, rsid vs settings, paraId uniqueness, rel targets, body structure, bookmark IDs, inline rIds). Parity harness verifies clean-flag and issue count match on Vielfalt cs15.docx. Three Python bugs discovered + fixed upstream during port: (1) body-structure rejected `<w:bookmarkStart>`/`<w:bookmarkEnd>` as direct body children — valid OOXML for multi-paragraph bookmarks; (2) rel-target resolver computed `base=".rels"` for the package-root `_rels/.rels`, prefixing every target with `.rels/`; (3) `cmd_check` crashed with KeyError on docx without `word/settings.xml` (optional per OPC). |
 | `cmd_headings(args)` | 951:430 | ⏳ | ⏳ | Heading outline + inference. Read-only. |
 | `cmd_footnotes(args)` | 951:530 | ⏳ | ⏳ | Footnote run-level dump. Read-only. |
 | `cmd_compare(args)` | 951:660 | ⏳ | ⏳ | Side-by-side style/structure comparison of two docx. |
@@ -220,6 +220,7 @@ the shell. Smoke-tested live against `2026 Vielfalt cs15.docx`:
 | Analyze blueprint | `analyze_blueprint(path) -> dict` | `analyze` |
 | Apply style mapping | `apply_style_mapping(path, bp, src=)` | (composed inside transplant) |
 | Infer heading levels | `infer_heading_levels(path, source=, apply_to_blueprint=)` | `infer-headings [--apply-to-blueprint]` |
+| Validate package | `check_package(path) -> (clean, oks, issues)` | `check` (exit 1 on failure, mirroring Python) |
 
 ---
 

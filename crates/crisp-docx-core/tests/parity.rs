@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crisp_docx_core::{
-    classify_style, clean_runs, convert_notes_kind, normalize_tags, open, save, strip_rsids,
-    NotesKind,
+    check_package, classify_style, clean_runs, convert_notes_kind, normalize_tags, open, save,
+    strip_rsids, NotesKind,
 };
 
 // ─── fixtures + plumbing ────────────────────────────────────────────────────
@@ -653,6 +653,52 @@ fn parity_classify_style() {
             "classify_style({name:?}): heading_level diverges (rust={rust_level}, python={py_level})"
         );
     }
+}
+
+#[test]
+fn parity_check_package() {
+    let Some(fx) = fixture(
+        "CRISP_DOCX_PARITY_VIELFALT",
+        "/Users/christianstrobele/OneDrive/2026 Vielfalt cs15.docx",
+    ) else {
+        eprintln!("CRISP_DOCX_PARITY_VIELFALT missing — skipping");
+        return;
+    };
+    let Some(py) = python_interpreter() else {
+        eprintln!("Python interpreter not available — skipping");
+        return;
+    };
+
+    let td = tempdir();
+    let unused = td.path().join("check.docx");
+    let py_report = run_python_primitive(&py, "check", &fx, &unused).expect("python check");
+    let py_clean = py_report["issue_count"].as_u64().unwrap_or(99) == 0;
+    let py_rc = py_report["rc"].as_u64().unwrap_or(99);
+
+    let pkg = open(&fx).expect("open");
+    let rust_report = check_package(&pkg).expect("check");
+
+    assert_eq!(
+        rust_report.is_clean(),
+        py_clean,
+        "PARITY: check_package clean-flag differs (rust={:?} clean={}, python clean={}, py_rc={})\n  rust_issues={:?}\n  python_issues={:?}",
+        rust_report.issues,
+        rust_report.is_clean(),
+        py_clean,
+        py_rc,
+        rust_report.issues,
+        py_report["issues"],
+    );
+    let py_count = py_report["issue_count"].as_u64().unwrap();
+    assert_eq!(
+        rust_report.issues.len() as u64,
+        py_count,
+        "PARITY: check_package issue counts differ (rust={}, python={})\n  rust_issues={:?}\n  python_issues={:?}",
+        rust_report.issues.len(),
+        py_count,
+        rust_report.issues,
+        py_report["issues"],
+    );
 }
 
 // ─── tempdir helper ─────────────────────────────────────────────────────────

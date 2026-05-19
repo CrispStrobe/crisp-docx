@@ -13,9 +13,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use crisp_docx_core::{
-    analyze_blueprint, apply_heading_inferences, convert_notes_kind, infer_heading_levels,
-    inject_footnotes, normalize_tags, open, save, strip_paragraph_bold, strip_rsids,
-    transplant_body, NotesKind, StyleIndex,
+    analyze_blueprint, apply_heading_inferences, check_package, convert_notes_kind,
+    infer_heading_levels, inject_footnotes, normalize_tags, open, save, strip_paragraph_bold,
+    strip_rsids, transplant_body, NotesKind, StyleIndex,
 };
 
 #[derive(Parser)]
@@ -55,6 +55,10 @@ enum Cmd {
 
     /// Print a human-readable summary of the package's parts.
     Inspect(InspectArgs),
+
+    /// Validate a docx — XML parse, rsid/paraId consistency, rel targets,
+    /// body structure, bookmark IDs, inline rIds. Exits 1 on failure.
+    Check(SingleFileArgs),
 }
 
 #[derive(clap::Args)]
@@ -174,6 +178,29 @@ fn main() -> Result<()> {
         Cmd::Analyze(args) => cmd_analyze(args),
         Cmd::InferHeadings(args) => cmd_infer_headings(args),
         Cmd::Inspect(args) => cmd_inspect(args),
+        Cmd::Check(args) => cmd_check(args),
+    }
+}
+
+fn cmd_check(args: SingleFileArgs) -> Result<()> {
+    let pkg = open(&args.input).with_context(|| format!("opening {}", args.input.display()))?;
+    let report = check_package(&pkg)?;
+    println!("Corruption/validity check: {}", args.input.display());
+    println!("{}", "=".repeat(72));
+    for line in &report.ok {
+        println!("  OK    {line}");
+    }
+    for line in &report.issues {
+        println!("  FAIL  {line}");
+    }
+    println!();
+    if report.is_clean() {
+        println!("Result: PASS — no issues found");
+        Ok(())
+    } else {
+        println!("Result: {} ISSUE(S) FOUND", report.issues.len());
+        // Match Python's exit code = 1 on failure.
+        std::process::exit(1);
     }
 }
 
