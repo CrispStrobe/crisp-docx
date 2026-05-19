@@ -75,6 +75,15 @@ def main() -> int:
         _emit({})
         return 0
 
+    if primitive == "classify_style":
+        # rest[0] holds the style name to classify
+        from format_transplant import classify_style  # type: ignore
+
+        name = rest[0] if rest else ""
+        sem, level = classify_style(name)
+        _emit({"class": sem, "level": int(level)})
+        return 0
+
     if primitive == "clean_runs":
         # Mirror format_transplant.py::DocumentBuilder._clean_runs on the
         # docx in place. Walk every <w:r> in document.xml, footnotes.xml,

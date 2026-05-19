@@ -26,7 +26,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crisp_docx_core::{
-    clean_runs, convert_notes_kind, normalize_tags, open, save, strip_rsids, NotesKind,
+    classify_style, clean_runs, convert_notes_kind, normalize_tags, open, save, strip_rsids,
+    NotesKind,
 };
 
 // ─── fixtures + plumbing ────────────────────────────────────────────────────
@@ -569,6 +570,89 @@ fn parity_clean_runs() {
     // RUNS THAT AREN'T FOOTNOTE REFS. We check the simplest version:
     // every w:r that has rPr should now contain only semantic children.
     // (A future-proofing check; for now we just verify the count agrees.)
+}
+
+#[test]
+fn parity_classify_style() {
+    let Some(py) = python_interpreter() else {
+        eprintln!("Python interpreter not available — skipping");
+        return;
+    };
+    // Sample of style names spanning every branch of the classifier —
+    // English headings, multilingual headings, regex fallback, title,
+    // body, footnote, caption, blockquote, abstract, unknown.
+    let names = [
+        "Heading 1",
+        "Heading 2",
+        "H3",
+        "Heading 1 Char",
+        "Überschrift 1",
+        "Titre 2",
+        "заголовок 3",
+        "Heading_02",
+        "Titolo3",
+        "Ueberschrift_01",
+        "Title",
+        "DocumentTitle",
+        "Normal",
+        "Body Text",
+        "Fließtext",
+        "Footnote Text",
+        "Fußnotentext",
+        "Caption",
+        "Bildunterschrift",
+        "Quote",
+        "Intense Quote",
+        "Abstract",
+        "Zusammenfassung",
+        "Whatever",
+        "RuntimeBlah",
+    ];
+
+    let td = tempdir();
+    for name in names {
+        let py_out = td.path().join("c.docx"); // unused but required by harness
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/parity_scripts/run_python.py");
+        let out = Command::new(&py)
+            .arg(&script)
+            .arg("classify_style")
+            .arg(&py_out)
+            .arg(&py_out)
+            .arg(name)
+            .output()
+            .expect("spawn python");
+        if !out.status.success() {
+            panic!(
+                "python classify_style({name:?}) failed: {} / stderr: {}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        let mut json_path = py_out.clone();
+        let new_ext = match json_path.extension().and_then(|s| s.to_str()) {
+            Some(ext) => format!("{ext}.json"),
+            None => "json".to_string(),
+        };
+        json_path.set_extension(new_ext);
+        let raw = std::fs::read_to_string(&json_path).expect("python wrote report file");
+        let v: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        let py_class = v["class"].as_str().expect("class string");
+        let py_level = v["level"].as_u64().expect("level number") as u8;
+
+        let rust = classify_style(name);
+        let rust_class = rust.class.as_str();
+        let rust_level = rust.heading_level;
+
+        assert_eq!(
+            rust_class, py_class,
+            "classify_style({name:?}): class diverges (rust={rust_class}, python={py_class})"
+        );
+        assert_eq!(
+            rust_level, py_level,
+            "classify_style({name:?}): heading_level diverges (rust={rust_level}, python={py_level})"
+        );
+    }
 }
 
 // ─── tempdir helper ─────────────────────────────────────────────────────────

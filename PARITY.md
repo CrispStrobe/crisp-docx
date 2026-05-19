@@ -90,9 +90,10 @@ in PLAN.md.
 
 | Python primitive | Lines | Rust equivalent | Status | Parity criterion |
 |---|---|---|---|---|
-| `BlueprintAnalyzer.analyze(doc) -> BlueprintSchema` | ~600 | ⏳ | ⏳ | Extracts sections, styles, defaults, body inventory, footnote-marker rPr. **Needs full port.** |
-| `ContentExtractor.extract(doc) -> (paragraphs, footnotes)` | ~280 | ⏳ | ⏳ | Parses runs/paragraphs/tables/footnotes; infers headings. **Needs full port.** |
-| `StyleMapper.map(src_name, sem_class, hl) -> str` | ~200 | ⏳ | ⏳ | Source-style → blueprint-style resolution. **Needs full port.** |
+| `classify_style(name) -> (sem, level)` | ~50 | `classify_style` | ✅ | Parity-tested on 25 style names across English/German/French/Italian/Spanish/Russian/Dutch/Swedish/Polish, including regex-fallback ("Heading_02", "Titre2") and substring forms. |
+| `BlueprintAnalyzer.analyze(doc) -> BlueprintSchema` | ~600 | partial: `FootnoteFormat` + `StyleIndex::from_styles_xml` | 🟡 | The two slices `StyleMapper` and `apply_footnote_format` need are ported (style index + footnote format). Sections / defaults / body inventory still pending. |
+| `ContentExtractor.extract(doc) -> (paragraphs, footnotes)` | ~280 | ⏳ | ⏳ | Parses runs/paragraphs/tables/footnotes; infers headings. Needs port. |
+| `StyleMapper.map(src_name, sem_class, hl) -> str` | ~200 | `StyleMapper::map` | ✅ | All 6 resolution-order branches ported (user override, semantic-heading-before-name, exact, case-insensitive, semantic class, body fallback) with 9 unit tests covering each branch. |
 | `DocumentBuilder.build(bp, out, elements, footnotes)` | ~600 | `transplant_body(bp, src)` | 🟡 | Now invokes `clean_runs` (rPr filter ✅) + `strip_rsids` (rsid scrub ✅). Still missing: footnote-marker rPr deep-copy from blueprint, `_normalize_fn_separator` (tab/space after footnote number), style mapping (StyleMapper). |
 | `MultiProviderLLMClient` | ~300 | n/a | 🚫 | Network I/O, not OOXML. |
 | Helper: `_strip_tracking_attrs(elem)` | ~50 | `strip_rsids` | 🟡 | Python helper strips per-node; Rust strips package-wide. Functionally equivalent if applied to whole document; need fixture-based equivalence check. |
