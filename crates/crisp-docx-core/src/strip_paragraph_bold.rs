@@ -128,10 +128,10 @@ fn para_is_all_bold(events: &[Event<'static>]) -> bool {
             Event::End(e) if in_run && e.name().as_ref() == b"w:rPr" => {
                 in_rpr = false;
             }
-            Event::Empty(e) if in_run && in_rpr && is_bold_marker(e) => {
-                if !is_bold_off(e) {
-                    current_has_bold = true;
-                }
+            Event::Empty(e)
+                if in_run && in_rpr && is_bold_marker(e) && !is_bold_off(e) =>
+            {
+                current_has_bold = true;
             }
             _ => {}
         }
