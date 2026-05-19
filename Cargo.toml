@@ -19,6 +19,8 @@ members = [
     "crates/crisp-docx-cli",
     "crates/crisp-docx-py",
     "crates/crisp-docx-align",
+    "crates/crisp-docx-llm",
+    "crates/crisp-translate-cli",
 ]
 
 [workspace.package]
@@ -53,7 +55,13 @@ serde_json   = "1"
 
 # Logging
 tracing            = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Async + HTTP (LLM clients live here)
+tokio       = { version = "1", features = ["macros", "rt-multi-thread", "fs"] }
+reqwest     = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+async-trait = "0.1"
+futures     = "0.3"
 
 # PyO3
 pyo3 = { version = "0.22", features = ["extension-module"] }

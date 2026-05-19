@@ -1,0 +1,23 @@
+[package]
+name        = "crisp-translate-cli"
+version     = "0.1.0"
+edition     = "2021"
+description = "End-to-end CLI: translate a .docx with format preserved, via crisp-docx + crisp-docx-llm."
+license     = { workspace = true }
+repository  = { workspace = true }
+
+[[bin]]
+name = "crisp-translate"
+path = "src/main.rs"
+
+[dependencies]
+crisp-docx-core = { workspace = true }
+crisp-docx-llm  = { path = "../crisp-docx-llm", version = "0.1.0" }
+
+anyhow      = { workspace = true }
+clap        = { workspace = true }
+futures     = { workspace = true }
+serde_json  = { workspace = true }
+tokio       = { workspace = true }
+tracing     = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

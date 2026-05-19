@@ -109,8 +109,8 @@ in PLAN.md.
 | `LindatAligner` (HTTP API call) | ~40 | n/a | 🚫 | Online aligner; orthogonal to the offline path. |
 | `MultiAligner` (orchestrator) | ~80 | n/a (orchestrator) | 🚫 | Composes the others. Caller-level concern. |
 | NMT backends (NLLB / OpusMT / Madlad400 / CTranslate2) | ~600 | n/a | 🚫 | Requires PyTorch / HF transformers / ctranslate2 — Rust has no comparable model coverage. |
-| `LLMTranslator` (OpenAI / Anthropic / Ollama / Groq HTTP clients) | ~300 | not yet | ⏳ | Thin REST wrappers, ~600 LOC of Rust + reqwest if/when wanted. |
-| `UltimateDocumentTranslator` (orchestrator) | ~580 | not yet | ⏳ | Composes the above. Wait until LLM clients land. |
+| `LLMTranslator` (OpenAI / Anthropic / Ollama / Groq HTTP clients) | ~300 | `crisp-docx-llm` crate (`LlmTranslator` + 4 providers) | ✅ | Full port. reqwest + tokio + async-trait. Provider trait abstraction lets the fallback chain mix any subset. 16 unit tests (incl. wiremock-driven wire-format tests for all 4 providers and the fallback path) + 4 env-gated live tests against real APIs. |
+| `UltimateDocumentTranslator` (orchestrator) | ~580 | `crisp-translate-cli` binary (`crisp-translate`) | 🟡 | Working end-to-end docx-to-docx translation with `--provider`/`--model`/`--source-lang`/`--target-lang`/`--dry-run`/`--concurrency`. Verified on Vielfalt cs15.docx: extracts 61 paragraphs cleanly. Format preservation in v0.1 is paragraph-level (pStyle, sections, footnote refs preserved); intra-paragraph run formatting collapses into a single run per paragraph. v0.2 will use `crisp-docx-align` to re-distribute runs across the translated text. |
 
 ## format_transplant.py
 
