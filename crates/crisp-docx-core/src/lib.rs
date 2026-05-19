@@ -25,6 +25,7 @@ pub mod error;
 pub mod ns;
 pub mod package;
 
+mod blueprint;
 mod clean_runs;
 mod footnote_format;
 mod normalize_tags;
@@ -36,6 +37,7 @@ mod style_classify;
 mod style_mapper;
 mod transplant;
 
+pub use blueprint::{analyze_blueprint, BlueprintSchema, SectionInfo};
 pub use clean_runs::clean_runs;
 pub use error::{Error, Result};
 pub use footnote_format::{apply_footnote_format, extract_footnote_format, FootnoteFormat};
