@@ -46,7 +46,7 @@ pub use package::Package;
 pub use rsid_strip::strip_rsids;
 pub use strip_paragraph_bold::strip_paragraph_bold;
 pub use style_classify::{classify_style, SemanticClass, StyleClassification};
-pub use style_mapper::{StyleIndex, StyleInfo, StyleMapper};
+pub use style_mapper::{apply_style_mapping, StyleIndex, StyleInfo, StyleMapper};
 pub use transplant::transplant_body;
 
 use std::path::Path;

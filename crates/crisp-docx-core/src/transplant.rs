@@ -40,6 +40,8 @@
 
 use std::path::Path;
 
+use std::collections::HashMap;
+
 use crate::clean_runs;
 use crate::error::{Error, Result};
 use crate::footnote_format::{apply_footnote_format, extract_footnote_format};
@@ -49,6 +51,7 @@ use crate::ns::{
 };
 use crate::package::Package;
 use crate::strip_rsids;
+use crate::style_mapper::{apply_style_mapping, StyleIndex, StyleMapper};
 
 /// Replace the body of `blueprint` with the body of `source` and bring
 /// across footnotes/endnotes when the source has them.
@@ -61,6 +64,16 @@ pub fn transplant_body(blueprint: &mut Package, source: &Package) -> Result<()> 
     // resulting footnote numbers wear the blueprint's font / vertical
     // alignment / separator convention.
     let bp_fn_format = extract_footnote_format(blueprint)?;
+
+    // Capture the blueprint's style index (styles.xml + which styles its
+    // body actually uses) before we overwrite its document.xml. We feed
+    // this into a StyleMapper at the end so source-side style references
+    // get remapped to blueprint equivalents.
+    let bp_style_index = StyleIndex::from_package(blueprint)?;
+    // Source's style index — needed to translate the styleIds we'll find
+    // in source's document.xml (after the body swap) to display names so
+    // StyleMapper can do its semantic-classification lookups.
+    let src_style_index = StyleIndex::from_package(source)?;
 
     let bp_doc = blueprint
         .get_part(PART_DOCUMENT)
@@ -117,6 +130,13 @@ pub fn transplant_body(blueprint: &mut Package, source: &Package) -> Result<()> 
     // carried-over notes parts. Mirrors DocumentBuilder._apply_fn_ref_style
     // + _normalize_fn_separator in format_transplant.py.
     apply_footnote_format(blueprint, &bp_fn_format)?;
+
+    // Apply StyleMapper to the transplanted body so source pStyle
+    // references resolve to blueprint equivalents (or fall back to
+    // blueprint's Normal style). Mirrors the per-paragraph style-rewrite
+    // step of DocumentBuilder._insert_elements + _style_id.
+    let mapper = StyleMapper::new(&bp_style_index, HashMap::new());
+    apply_style_mapping(blueprint, &mapper, &src_style_index, &bp_style_index)?;
 
     Ok(())
 }

@@ -26,6 +26,8 @@ use crate::style_classify::{classify_style, SemanticClass};
 pub struct StyleInfo {
     /// The style's display name (the `<w:name w:val="…"/>` text).
     pub name: String,
+    /// The style's `w:styleId` — what `<w:pStyle w:val="…"/>` references.
+    pub style_id: String,
     /// 1 = paragraph, 2 = character, 3 = table, 4 = numbering.
     pub type_val: u8,
     /// OOXML outline level (0 = H1 … 8 = H9). `None` if not a heading style.
@@ -40,12 +42,42 @@ pub struct StyleInfo {
 pub struct StyleIndex {
     /// `style_name -> info`.
     pub styles: BTreeMap<String, StyleInfo>,
+    /// `style_id -> display_name` lookup. Needed because `<w:pStyle
+    /// w:val="…"/>` references a styleId, but `StyleMapper.map()` keys
+    /// on the display name (matches Python's behaviour and gets the
+    /// multilingual `classify_style` patterns right).
+    pub id_to_name: BTreeMap<String, String>,
+    /// Inverse of [`Self::id_to_name`]: display name -> styleId. Used to
+    /// translate a mapped name back into a styleId when writing
+    /// `<w:pStyle>` in the output.
+    pub name_to_id: BTreeMap<String, String>,
     /// Style names that actually appear on body paragraphs (used as
     /// tie-breaker when multiple styles claim the same outline level).
     pub body_para_style_names: BTreeSet<String>,
 }
 
 impl StyleIndex {
+    /// Build a [`StyleIndex`] from both `word/styles.xml` and
+    /// `word/document.xml` of a package. The document is scanned for
+    /// `<w:pStyle w:val="X"/>` references to populate
+    /// [`Self::body_para_style_names`], which `StyleMapper` uses as a
+    /// tie-breaker.
+    ///
+    /// Returns an empty index (with default styles) if `word/styles.xml`
+    /// isn't present in `pkg`.
+    pub fn from_package(pkg: &crate::Package) -> crate::Result<Self> {
+        let mut idx = if let Some(styles) = pkg.get_part("word/styles.xml") {
+            Self::from_styles_xml(styles)?
+        } else {
+            Self::default()
+        };
+        if let Some(doc) = pkg.get_part("word/document.xml") {
+            let names = scan_body_para_styles(doc)?;
+            idx.body_para_style_names = names;
+        }
+        Ok(idx)
+    }
+
     /// Build a [`StyleIndex`] from a `word/styles.xml` byte payload.
     /// Reads `<w:style>` elements and their `<w:name>`, `<w:outlineLvl>`,
     /// and `w:type` attributes.
@@ -81,8 +113,11 @@ impl StyleIndex {
                                     _ => 0,
                                 };
                             }
-                            b"w:styleId" if info.name.is_empty() => {
-                                info.name = val.to_string();
+                            b"w:styleId" => {
+                                info.style_id = val.to_string();
+                                if info.name.is_empty() {
+                                    info.name = val.to_string();
+                                }
                             }
                             _ => {}
                         }
@@ -92,6 +127,12 @@ impl StyleIndex {
                 quick_xml::events::Event::End(e) if e.name().as_ref() == b"w:style" => {
                     if let Some(info) = current.take() {
                         if !info.name.is_empty() {
+                            if !info.style_id.is_empty() {
+                                idx.id_to_name
+                                    .insert(info.style_id.clone(), info.name.clone());
+                                idx.name_to_id
+                                    .insert(info.name.clone(), info.style_id.clone());
+                            }
                             idx.styles.insert(info.name.clone(), info);
                         }
                     }
@@ -132,6 +173,164 @@ impl StyleIndex {
         }
         Ok(idx)
     }
+}
+
+/// Walk `document.xml` and collect the set of style names referenced by
+/// `<w:pStyle w:val="…"/>` directly inside paragraph properties — i.e.
+/// the styles actually used on body paragraphs. Mirrors part of
+/// `BlueprintAnalyzer._body_inventory`.
+fn scan_body_para_styles(input: &[u8]) -> crate::Result<BTreeSet<String>> {
+    let mut out = BTreeSet::new();
+    let mut reader = quick_xml::reader::Reader::from_reader(input);
+    reader.config_mut().trim_text(false);
+    reader.config_mut().expand_empty_elements = false;
+    let mut buf = Vec::with_capacity(1024);
+    loop {
+        let ev = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| crate::Error::XmlParse {
+                part: "word/document.xml".into(),
+                source: e,
+            })?;
+        match ev {
+            quick_xml::events::Event::Eof => break,
+            quick_xml::events::Event::Empty(s) | quick_xml::events::Event::Start(s)
+                if s.name().as_ref() == b"w:pStyle" =>
+            {
+                for a in s.attributes().filter_map(Result::ok) {
+                    if a.key.as_ref() == b"w:val" {
+                        if let Ok(v) = std::str::from_utf8(a.value.as_ref()) {
+                            out.insert(v.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
+/// Rewrite every `<w:pStyle w:val="X"/>` in `pkg`'s body so the
+/// referenced styleId points at the blueprint's equivalent.
+///
+/// The translation per `<w:pStyle val="X">` is:
+///
+/// 1. `source_index.id_to_name[X]` → source style's display name
+/// 2. `mapper.map(name, classify_style(name), …)` → blueprint display name
+/// 3. `blueprint_index.name_to_id[name]` → blueprint styleId
+///
+/// Steps 1 and 3 fall back to the original `val` if the lookup fails,
+/// preserving robustness on docx whose ids don't match between sides.
+///
+/// Mirrors `DocumentBuilder._insert_elements` + `_style_id` in
+/// `format_transplant.py`. Returns the number of paragraph styles whose
+/// `val` ended up different from the input.
+pub fn apply_style_mapping(
+    pkg: &mut crate::Package,
+    mapper: &StyleMapper,
+    source_index: &StyleIndex,
+    blueprint_index: &StyleIndex,
+) -> crate::Result<usize> {
+    let Some(bytes) = pkg.get_part("word/document.xml").map(<[u8]>::to_vec) else {
+        return Ok(0);
+    };
+    let (new_bytes, rewritten) = rewrite_pstyles(&bytes, mapper, source_index, blueprint_index)?;
+    if rewritten > 0 {
+        pkg.set_part("word/document.xml", new_bytes);
+    }
+    Ok(rewritten)
+}
+
+fn rewrite_pstyles(
+    input: &[u8],
+    mapper: &StyleMapper,
+    source_index: &StyleIndex,
+    blueprint_index: &StyleIndex,
+) -> crate::Result<(Vec<u8>, usize)> {
+    use crate::style_classify::classify_style;
+
+    let mut reader = quick_xml::reader::Reader::from_reader(input);
+    reader.config_mut().trim_text(false);
+    reader.config_mut().expand_empty_elements = false;
+    let mut writer =
+        quick_xml::writer::Writer::new(std::io::Cursor::new(Vec::with_capacity(input.len())));
+    let mut buf = Vec::with_capacity(1024);
+    let mut rewritten = 0usize;
+
+    loop {
+        let ev = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| crate::Error::XmlParse {
+                part: "word/document.xml".into(),
+                source: e,
+            })?;
+        let is_pstyle = matches!(
+            &ev,
+            quick_xml::events::Event::Empty(s) | quick_xml::events::Event::Start(s)
+                if s.name().as_ref() == b"w:pStyle"
+        );
+        if is_pstyle {
+            let is_empty = matches!(&ev, quick_xml::events::Event::Empty(_));
+            let s = match &ev {
+                quick_xml::events::Event::Empty(s) | quick_xml::events::Event::Start(s) => s,
+                _ => unreachable!(),
+            };
+            let mut new = quick_xml::events::BytesStart::new("w:pStyle");
+            let mut target_val: Option<String> = None;
+            for a in s.attributes().filter_map(Result::ok) {
+                if a.key.as_ref() == b"w:val" {
+                    if let Ok(src_id) = std::str::from_utf8(a.value.as_ref()) {
+                        // Translate src styleId -> src display name.
+                        let src_name = source_index
+                            .id_to_name
+                            .get(src_id)
+                            .map(String::as_str)
+                            .unwrap_or(src_id);
+                        // Classify by name; ask mapper for blueprint name.
+                        let c = classify_style(src_name);
+                        let mapped_name = mapper.map(src_name, &c.class, c.heading_level);
+                        // Translate blueprint name -> blueprint styleId.
+                        let target_id = blueprint_index
+                            .name_to_id
+                            .get(&mapped_name)
+                            .cloned()
+                            .unwrap_or_else(|| mapped_name.clone());
+                        if target_id != src_id {
+                            rewritten += 1;
+                        }
+                        target_val = Some(target_id);
+                    }
+                } else {
+                    new.push_attribute(a);
+                }
+            }
+            if let Some(val) = target_val {
+                new.push_attribute(("w:val", val.as_str()));
+            }
+            let new_ev = if is_empty {
+                quick_xml::events::Event::Empty(new)
+            } else {
+                quick_xml::events::Event::Start(new)
+            };
+            writer
+                .write_event(new_ev)
+                .map_err(|e| crate::Error::XmlParse {
+                    part: "word/document.xml".into(),
+                    source: e,
+                })?;
+        } else if matches!(&ev, quick_xml::events::Event::Eof) {
+            break;
+        } else {
+            writer.write_event(ev).map_err(|e| crate::Error::XmlParse {
+                part: "word/document.xml".into(),
+                source: e,
+            })?;
+        }
+        buf.clear();
+    }
+    Ok((writer.into_inner().into_inner(), rewritten))
 }
 
 /// Source-name → blueprint-name mapping policy.
@@ -369,10 +568,13 @@ mod tests {
                 name.to_string(),
                 StyleInfo {
                     name: name.to_string(),
+                    style_id: name.to_string(),
                     type_val: *type_val,
                     outline_level: *outline_level,
                 },
             );
+            idx.id_to_name.insert(name.to_string(), name.to_string());
+            idx.name_to_id.insert(name.to_string(), name.to_string());
         }
         idx
     }

@@ -234,6 +234,67 @@ fn transplant_strips_rsids_from_grafted_runs() {
 }
 
 #[test]
+fn transplant_remaps_styleids_when_blueprint_uses_different_ids() {
+    use crisp_docx_core::{apply_style_mapping, transplant_body, StyleIndex, StyleMapper};
+    use std::collections::HashMap;
+
+    // Blueprint with a custom styleId for the H1 heading: "MyH1" named
+    // "Heading 1". Source uses pandoc's "Heading1". The mapper should
+    // rewrite "Heading1" → "MyH1" via name-roundtripping.
+    let blueprint_doc = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="MyH1"/></w:pPr><w:r><w:t>Title</w:t></w:r></w:p><w:sectPr/></w:body></w:document>"#;
+    let blueprint_styles = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="MyH1"><w:name w:val="heading 1"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>"#;
+    let source_doc = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Source title</w:t></w:r></w:p><w:sectPr/></w:body></w:document>"#;
+    let source_styles = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>"#;
+    let content_types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>"#;
+    let rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>"#;
+
+    let make = |doc: &str, styles: &str| -> Vec<u8> {
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut zw = zip::ZipWriter::new(buf);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        use std::io::Write;
+        zw.start_file("[Content_Types].xml", opts).unwrap();
+        zw.write_all(content_types.as_bytes()).unwrap();
+        zw.start_file("word/document.xml", opts).unwrap();
+        zw.write_all(doc.as_bytes()).unwrap();
+        zw.start_file("word/styles.xml", opts).unwrap();
+        zw.write_all(styles.as_bytes()).unwrap();
+        zw.start_file("word/_rels/document.xml.rels", opts).unwrap();
+        zw.write_all(rels.as_bytes()).unwrap();
+        zw.finish().unwrap().into_inner()
+    };
+
+    let mut bp = Package::from_bytes(&make(blueprint_doc, blueprint_styles)).unwrap();
+    let src = Package::from_bytes(&make(source_doc, source_styles)).unwrap();
+    transplant_body(&mut bp, &src).unwrap();
+
+    let doc = part_str(&bp, "word/document.xml");
+    assert!(
+        doc.contains(r#"w:val="MyH1""#),
+        "expected pStyle remapped to MyH1, got: {doc}"
+    );
+    assert!(
+        !doc.contains(r#"w:val="Heading1""#),
+        "source styleId should be gone"
+    );
+    // Source content is in.
+    assert!(doc.contains("Source title"));
+
+    // Direct apply_style_mapping test, decoupled from transplant.
+    let mut bp2 = Package::from_bytes(&make(blueprint_doc, blueprint_styles)).unwrap();
+    // Force the document to contain a source-styleId paragraph.
+    let src_bytes = source_doc.as_bytes().to_vec();
+    bp2.set_part("word/document.xml", src_bytes);
+    let bp_idx = StyleIndex::from_package(&bp2).unwrap();
+    let src_idx = StyleIndex::from_styles_xml(source_styles.as_bytes()).unwrap();
+    let mapper = StyleMapper::new(&bp_idx, HashMap::new());
+    let n = apply_style_mapping(&mut bp2, &mapper, &src_idx, &bp_idx).unwrap();
+    assert_eq!(n, 1, "expected exactly one paragraph rewritten");
+    assert!(part_str(&bp2, "word/document.xml").contains(r#"w:val="MyH1""#));
+}
+
+#[test]
 fn save_then_open_round_trips_to_byte_equivalent_content() {
     use std::io::Write;
     let original = common::docx_with_rsids();
