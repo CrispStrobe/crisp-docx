@@ -97,8 +97,8 @@ in PLAN.md.
 | `MultiProviderLLMClient` | ~300 | n/a | 🚫 | Network I/O, not OOXML. |
 | Helper: `_strip_tracking_attrs(elem)` | ~50 | `strip_rsids` | 🟡 | Python helper strips per-node; Rust strips package-wide. Functionally equivalent if applied to whole document; need fixture-based equivalence check. |
 | Helper: `_clean_runs(p, keep_set)` | ~80 | `clean_runs(pkg)` | ✅ | Removal-count parity verified on cs15.docx via parity harness. KEEP_RPR_TAGS locked to Python's set (regression-tested). Wired into `transplant_body`. |
-| Helper: `_apply_fn_ref_style(footnote, rpr_xml)` | ~30 | ⏳ | ⏳ | Apply blueprint's footnote marker rPr to each transplanted footnote's first run. **Missing.** |
-| Helper: `_normalize_fn_separator(footnote)` | ~80 | ⏳ | ⏳ | Reconstruct the tab/space between the footnote number and body. **Missing.** |
+| Helper: `_apply_fn_ref_style(footnote, rpr_xml)` | ~30 | `apply_footnote_format` (rPr half) | ✅ | Verified on real cs15.docx + pandoc-built blueprint: transplant output's marker run rPr matches blueprint verbatim. |
+| Helper: `_normalize_fn_separator(footnote)` | ~80 | `apply_footnote_format` (separator half) | ✅ | Three branches ported (matches → no-op; differs → replace; absent → insert). Captures tab/whitespace/empty per Python. |
 | Helper: `_transplant_footnotes(blueprint, source_footnotes, schema)` | ~130 | partial in `transplant_body` | 🟡 | Python carries footnotes with rPr application; Rust just copies the bytes. **Diverges.** |
 | Helper: `_clear_body(doc)` | ~30 | partial in `transplant_body` | 🟡 | Python preserves final `<w:sectPr>`; Rust does too via byte-level. Approximately equivalent. |
 
