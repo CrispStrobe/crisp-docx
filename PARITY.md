@@ -158,18 +158,33 @@ End result: the user sees a paragraph that's mostly plain text with the
 last third in bold, with `**[S23]` rendered as literal characters at the
 start.
 
-**This is a CrispTranslator/rtf_to_docx_endnotes.py bug, not a crisp-docx
-bug.** My Rust port behaves consistently with the Python (both decline to
-touch this paragraph). The fix has to be upstream: either
+**Fixed** in CrispTranslator `f6b5ff4` (2026-05-19). Added a preprocess to
+`strip_paragraph_bold` that strips three patterns to a fixed point:
 
-  (a) Preprocess the markdown to strip spurious `**X**` patterns around
-      single non-ASCII characters before `strip_paragraph_bold` runs, or
+```python
+re.compile(r"\*\*([^\sA-Za-z0-9\*])\*\*")  # **X**
+re.compile(r"\*\*([^\sA-Za-z0-9\*])\*")    # **X*  (bold-open + char + italic-close)
+re.compile(r"\*([^\sA-Za-z0-9\*])\*\*")    # *X**  (italic-open + char + bold-close)
+```
 
-  (b) Detect mismatched outer `**` and balance them before the regex runs.
+Iterating to fixed point handles cases like `*synag**ô**g**ç*`:
+strip `**ô**` → `*synagôg**ç*` → strip `**ç*` → `*synagôgç*`.
 
-**Action:** filed as an upstream issue against `CrispTranslator`. Tracking
-here under Issue #1; Rust port stays consistent with Python until the
-upstream fix lands, then the fix gets ported across.
+Result on the real Vielfalt cs15.rtf:
+  before: 50 paragraphs unbolded; paragraph #49 still 28% bold; leading
+          `**[S23]` rendered as literal text
+  after:  54 paragraphs unbolded; paragraph #49 is 0% bold; clean `[S23]`
+          start; 0 all-bold paragraphs and 0 mostly-bold paragraphs remain
+
+Two new regression tests in CrispTranslator/tests/test_text_processing.py
+(`test_strips_spurious_single_char_non_ascii_bold`,
+`test_leaves_legitimate_intra_paragraph_emphasis_on_ascii_word`).
+41/41 CrispTranslator tests pass.
+
+The Rust `strip_paragraph_bold` works at the docx level (after pandoc),
+not at the markdown level, so it isn't affected by the source-side bug.
+Documents produced by the fixed Python pipeline are already clean when
+they reach the Rust transplant.
 
 ### Issue #2 — `transplant_body` is structurally different from Python
 
