@@ -29,6 +29,7 @@ mod normalize_tags;
 mod note_injection;
 mod notes_kind;
 mod rsid_strip;
+mod strip_paragraph_bold;
 mod transplant;
 
 pub use error::{Error, Result};
@@ -37,6 +38,7 @@ pub use note_injection::{inject_footnotes, InjectionReport};
 pub use notes_kind::{convert_notes_kind, NotesKind};
 pub use package::Package;
 pub use rsid_strip::strip_rsids;
+pub use strip_paragraph_bold::strip_paragraph_bold;
 pub use transplant::transplant_body;
 
 use std::path::Path;

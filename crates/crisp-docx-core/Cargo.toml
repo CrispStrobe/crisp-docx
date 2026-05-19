@@ -18,4 +18,5 @@ zip        = { workspace = true }
 thiserror  = { workspace = true }
 
 [dev-dependencies]
-anyhow = { workspace = true }
+anyhow     = { workspace = true }
+serde_json = { workspace = true }
