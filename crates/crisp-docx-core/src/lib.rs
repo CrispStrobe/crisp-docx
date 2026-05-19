@@ -26,6 +26,7 @@ pub mod ns;
 pub mod package;
 
 mod clean_runs;
+mod footnote_format;
 mod normalize_tags;
 mod note_injection;
 mod notes_kind;
@@ -35,6 +36,7 @@ mod transplant;
 
 pub use clean_runs::clean_runs;
 pub use error::{Error, Result};
+pub use footnote_format::{apply_footnote_format, extract_footnote_format, FootnoteFormat};
 pub use normalize_tags::normalize_tags;
 pub use note_injection::{inject_footnotes, InjectionReport};
 pub use notes_kind::{convert_notes_kind, NotesKind};

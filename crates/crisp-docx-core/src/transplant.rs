@@ -42,6 +42,7 @@ use std::path::Path;
 
 use crate::clean_runs;
 use crate::error::{Error, Result};
+use crate::footnote_format::{apply_footnote_format, extract_footnote_format};
 use crate::ns::{
     CT_ENDNOTES, CT_FOOTNOTES, PART_CONTENT_TYPES, PART_DOCUMENT, PART_DOCUMENT_RELS,
     PART_ENDNOTES, PART_FOOTNOTES, REL_TYPE_ENDNOTES, REL_TYPE_FOOTNOTES,
@@ -55,6 +56,12 @@ use crate::strip_rsids;
 /// `blueprint` is mutated in place. Use `Package::clone` first if you want
 /// to keep the original around.
 pub fn transplant_body(blueprint: &mut Package, source: &Package) -> Result<()> {
+    // Capture the blueprint's footnote-marker format BEFORE we overwrite
+    // its footnotes.xml with the source's. This is what makes the
+    // resulting footnote numbers wear the blueprint's font / vertical
+    // alignment / separator convention.
+    let bp_fn_format = extract_footnote_format(blueprint)?;
+
     let bp_doc = blueprint
         .get_part(PART_DOCUMENT)
         .ok_or_else(|| invalid(blueprint, "missing word/document.xml in blueprint"))?
@@ -105,6 +112,11 @@ pub fn transplant_body(blueprint: &mut Package, source: &Package) -> Result<()> 
         CT_ENDNOTES,
         REL_TYPE_ENDNOTES,
     );
+
+    // Apply the blueprint's captured footnote-marker format to the
+    // carried-over notes parts. Mirrors DocumentBuilder._apply_fn_ref_style
+    // + _normalize_fn_separator in format_transplant.py.
+    apply_footnote_format(blueprint, &bp_fn_format)?;
 
     Ok(())
 }
