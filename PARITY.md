@@ -112,18 +112,64 @@ User reported (2026-05-19) opening `/tmp/transplanted.docx` in Word:
 several paragraphs ("The classical tradition's final word on religious …",
 "synagôgç. The polemical strands …") render bold when they shouldn't.
 
-Rust ran `strip_paragraph_bold` and reported "unbolded 1 paragraph". Python's
-`strip_paragraph_bold` operates on Markdown — different abstraction layer.
+Rust ran `strip_paragraph_bold` and reported "unbolded 1 paragraph".
 
-Hypothesis: the paragraphs the user sees are bold because their source RTF
-runs carry explicit `<w:b/>` and my detector misses them because the source's
-runs have additional rPr children that confuse the heuristic, or because
-the paragraphs aren't *whole-paragraph* bold but rather every-run-but-one
-bold.
+**Diagnosis (2026-05-19, after running the full pipeline + paragraph-by-paragraph audit):**
 
-**Validation step (before any further coding):** dump every `<w:p>` from
-`/tmp/transplanted.docx`, classify each as `all-bold / mixed / not-bold`,
-identify which paragraphs the user means, compare to my detector's output.
+The user's reported paragraph "The classical tradition's final word…" *is*
+genuine whole-paragraph bold (paragraph #45, 7/7 runs bold). My Rust
+detector correctly handled it.
+
+The user's second reported paragraph "synagôgç. The polemical strands…"
+is a SECTION of paragraph #49. Paragraph #49 is **28% bold by character
+count** — the tail third is bold, the rest plain. It is not
+whole-paragraph bold.
+
+**Why the tail is bold (Python pipeline bug):**
+
+`pandoc rtf → md` translated the source RTF into:
+
+```
+**\[S23\] It is worth pausing… *krisis* and *synag**ô**g**ç*. The polemical strands… humans have achieved.**
+```
+
+The outer `**…**` would have wrapped the entire paragraph. But pandoc's
+RTF reader also injected nested `**ô**` and `**ç**` around individual
+non-ASCII letters (the source RTF had per-character bold formatting for
+those Unicode codepoints). The resulting markdown has **mismatched
+nested `**` markers**.
+
+Python's `strip_paragraph_bold` regex:
+
+```python
+_WHOLE_PARA_BOLD_RE = re.compile(
+    r"\A(\*\*)(?P<inner>(?:(?!\*\*).)+)\*\*\Z", re.DOTALL,
+)
+```
+
+The `(?:(?!\*\*).)+` clause **rejects** any inner content containing `**`.
+The regex correctly declines to touch a paragraph with mismatched markers.
+But that leaves the paragraph un-stripped, and pandoc's md-→-docx parser
+then renders it as a confused mixture: the leading `**[S23]` becomes
+literal text (not bold), then a section in the middle becomes bold, then
+some non-bold, then more bold for the tail.
+
+End result: the user sees a paragraph that's mostly plain text with the
+last third in bold, with `**[S23]` rendered as literal characters at the
+start.
+
+**This is a CrispTranslator/rtf_to_docx_endnotes.py bug, not a crisp-docx
+bug.** My Rust port behaves consistently with the Python (both decline to
+touch this paragraph). The fix has to be upstream: either
+
+  (a) Preprocess the markdown to strip spurious `**X**` patterns around
+      single non-ASCII characters before `strip_paragraph_bold` runs, or
+
+  (b) Detect mismatched outer `**` and balance them before the regex runs.
+
+**Action:** filed as an upstream issue against `CrispTranslator`. Tracking
+here under Issue #1; Rust port stays consistent with Python until the
+upstream fix lands, then the fix gets ported across.
 
 ### Issue #2 — `transplant_body` is structurally different from Python
 
