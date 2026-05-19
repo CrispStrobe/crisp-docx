@@ -19,7 +19,8 @@ use pyo3::prelude::*;
 
 use crisp_docx_core::{
     convert_notes_kind as core_convert, inject_footnotes as core_inject,
-    normalize_tags as core_normalize, open, save, strip_rsids as core_strip, NotesKind,
+    normalize_tags as core_normalize, open, save, strip_rsids as core_strip,
+    transplant_body as core_transplant, NotesKind,
 };
 
 #[pyclass(eq, eq_int)]
@@ -97,6 +98,24 @@ fn inject_footnotes(
     Ok((report.inserted, report.unknown_ids, report.unused_ids))
 }
 
+/// Replace the body of `blueprint_path` with the body of `source_path`,
+/// preserving the blueprint's trailing `<w:sectPr>` (page layout) and
+/// stripping rsid tracking attrs from grafted runs. Footnotes/endnotes
+/// in the source are carried over.
+#[pyfunction]
+#[pyo3(signature = (blueprint_path, source_path, output_path))]
+fn transplant_body(
+    blueprint_path: PathBuf,
+    source_path: PathBuf,
+    output_path: PathBuf,
+) -> PyResult<()> {
+    let mut bp = open(&blueprint_path).map_err(map_err)?;
+    let src = open(&source_path).map_err(map_err)?;
+    core_transplant(&mut bp, &src).map_err(map_err)?;
+    save(&bp, &output_path).map_err(map_err)?;
+    Ok(())
+}
+
 /// `crisp_docx` Python module.
 #[pymodule]
 fn crisp_docx(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -106,5 +125,6 @@ fn crisp_docx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(normalize_tags, m)?)?;
     m.add_function(wrap_pyfunction!(convert_notes_kind, m)?)?;
     m.add_function(wrap_pyfunction!(inject_footnotes, m)?)?;
+    m.add_function(wrap_pyfunction!(transplant_body, m)?)?;
     Ok(())
 }

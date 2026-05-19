@@ -9,7 +9,8 @@ mod common;
 use std::collections::BTreeMap;
 
 use crisp_docx_core::{
-    convert_notes_kind, inject_footnotes, normalize_tags, strip_rsids, NotesKind, Package,
+    convert_notes_kind, inject_footnotes, normalize_tags, strip_rsids, transplant_body, NotesKind,
+    Package,
 };
 
 fn part_str<'a>(pkg: &'a Package, name: &str) -> &'a str {
@@ -183,6 +184,53 @@ fn inject_footnotes_reports_unknown_and_unused() {
     // The body still contains the unmatched [2] verbatim.
     let doc = part_str(&pkg, "word/document.xml");
     assert!(doc.contains("[2]"));
+}
+
+#[test]
+fn transplant_swaps_body_and_preserves_blueprint_sectpr() {
+    let mut bp = Package::from_bytes(&common::docx_blueprint()).unwrap();
+    let src = Package::from_bytes(&common::docx_source_with_footnotes()).unwrap();
+
+    transplant_body(&mut bp, &src).unwrap();
+
+    let doc = part_str(&bp, "word/document.xml");
+
+    // Source content is present.
+    assert!(doc.contains("source paragraph one"));
+    assert!(doc.contains("source paragraph two"));
+
+    // Blueprint's distinctive paragraph is gone — only its sectPr survives.
+    assert!(!doc.contains("blueprint-only paragraph"));
+
+    // Blueprint's sectPr (letter size) is preserved; source's (8000x10000) is dropped.
+    assert!(doc.contains("12240"), "letter width missing");
+    assert!(doc.contains("15840"), "letter height missing");
+    assert!(!doc.contains("w:w=\"8000\""), "source sectPr leaked");
+    assert!(!doc.contains("w:h=\"10000\""), "source sectPr leaked");
+
+    // Footnotes part carried over.
+    let fn_part = part_str(&bp, "word/footnotes.xml");
+    assert!(fn_part.contains("source note 1"));
+
+    // Content-types and rels patched.
+    let ct = part_str(&bp, "[Content_Types].xml");
+    assert!(ct.contains("/word/footnotes.xml"));
+    let rels = part_str(&bp, "word/_rels/document.xml.rels");
+    assert!(rels.contains("relationships/footnotes"));
+    assert!(rels.contains(r#"Target="footnotes.xml""#));
+}
+
+#[test]
+fn transplant_strips_rsids_from_grafted_runs() {
+    // Source has rsid attrs on a paragraph; blueprint has none. After
+    // transplant, the result must be rsid-free.
+    let mut bp = Package::from_bytes(&common::docx_blueprint()).unwrap();
+    let src = Package::from_bytes(&common::docx_with_rsids()).unwrap();
+    transplant_body(&mut bp, &src).unwrap();
+    let doc = part_str(&bp, "word/document.xml");
+    for needle in ["paraId", "rsidR", "rsidRPr", "rsidRDefault"] {
+        assert!(!doc.contains(needle), "should be stripped: {needle}");
+    }
 }
 
 #[test]

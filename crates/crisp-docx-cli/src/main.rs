@@ -13,7 +13,8 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use crisp_docx_core::{
-    convert_notes_kind, inject_footnotes, normalize_tags, open, save, strip_rsids, NotesKind,
+    convert_notes_kind, inject_footnotes, normalize_tags, open, save, strip_rsids, transplant_body,
+    NotesKind,
 };
 
 #[derive(Parser)]
@@ -38,6 +39,9 @@ enum Cmd {
 
     /// Inject Word footnote references at every inline `[N]` marker.
     InjectFootnotes(InjectArgs),
+
+    /// Transplant a source's body into a blueprint's package.
+    Transplant(TransplantArgs),
 
     /// Print a human-readable summary of the package's parts.
     Inspect(InspectArgs),
@@ -84,6 +88,17 @@ struct InjectArgs {
 }
 
 #[derive(clap::Args)]
+struct TransplantArgs {
+    /// Path to the blueprint .docx (provides formatting / page layout).
+    blueprint: PathBuf,
+    /// Path to the source .docx (provides body content).
+    source: PathBuf,
+    /// Output path for the transplanted result.
+    #[arg(short, long)]
+    output: PathBuf,
+}
+
+#[derive(clap::Args)]
 struct InspectArgs {
     /// Path to the input .docx file.
     input: PathBuf,
@@ -115,6 +130,7 @@ fn main() -> Result<()> {
         Cmd::Clean(args) => cmd_clean(args),
         Cmd::NotesKind(args) => cmd_notes_kind(args),
         Cmd::InjectFootnotes(args) => cmd_inject_footnotes(args),
+        Cmd::Transplant(args) => cmd_transplant(args),
         Cmd::Inspect(args) => cmd_inspect(args),
     }
 }
@@ -197,6 +213,22 @@ fn cmd_inject_footnotes(args: InjectArgs) -> Result<()> {
             report.unknown_ids
         );
     }
+    Ok(())
+}
+
+fn cmd_transplant(args: TransplantArgs) -> Result<()> {
+    let mut bp = open(&args.blueprint)
+        .with_context(|| format!("opening blueprint {}", args.blueprint.display()))?;
+    let src =
+        open(&args.source).with_context(|| format!("opening source {}", args.source.display()))?;
+    transplant_body(&mut bp, &src)?;
+    save(&bp, &args.output)?;
+    println!(
+        "transplanted {} into {} -> {}",
+        args.source.display(),
+        args.blueprint.display(),
+        args.output.display()
+    );
     Ok(())
 }
 

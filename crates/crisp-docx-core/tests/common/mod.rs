@@ -39,6 +39,33 @@ pub fn docx_with_inline_markers() -> Vec<u8> {
 
 const EMPTY_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#;
 
+/// Make a blueprint-style docx: distinctive paragraph + a trailing sectPr
+/// with letter-size page dimensions.
+pub fn docx_blueprint() -> Vec<u8> {
+    let body = br#"<w:p><w:r><w:t>blueprint-only paragraph</w:t></w:r></w:p><w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>"#;
+    zip_package(&[
+        ("[Content_Types].xml", CONTENT_TYPES_MINIMAL.as_bytes()),
+        ("word/document.xml", &build_document(body)),
+        ("word/_rels/document.xml.rels", EMPTY_RELS.as_bytes()),
+    ])
+}
+
+/// Make a source-style docx: distinctive paragraphs + its own (different)
+/// sectPr we expect transplant to drop. Also carries a footnotes part so
+/// we can check transplant carries it over.
+pub fn docx_source_with_footnotes() -> Vec<u8> {
+    let body = br#"<w:p><w:r><w:t>source paragraph one</w:t></w:r></w:p><w:p><w:r><w:t>source paragraph two</w:t></w:r></w:p><w:sectPr><w:pgSz w:w="8000" w:h="10000"/></w:sectPr>"#;
+    let footnotes = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote w:id="-1" w:type="separator"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:id="0" w:type="continuationSeparator"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote><w:footnote w:id="1"><w:p><w:r><w:t>source note 1</w:t></w:r></w:p></w:footnote></w:footnotes>"#;
+    let rels = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/></Relationships>"#;
+    let content_types = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/></Types>"#;
+    zip_package(&[
+        ("[Content_Types].xml", content_types),
+        ("word/document.xml", &build_document(body)),
+        ("word/footnotes.xml", footnotes),
+        ("word/_rels/document.xml.rels", rels),
+    ])
+}
+
 /// Make a docx with a working footnotes part (id=1) referenced from the body.
 pub fn docx_with_footnotes() -> Vec<u8> {
     let body = br#"<w:p><w:r><w:t xml:space="preserve">Body. </w:t></w:r><w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteReference w:id="1"/></w:r><w:r><w:t xml:space="preserve"> after.</w:t></w:r></w:p>"#;
