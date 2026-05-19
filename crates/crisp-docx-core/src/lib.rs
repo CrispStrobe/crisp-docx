@@ -25,6 +25,7 @@ pub mod error;
 pub mod ns;
 pub mod package;
 
+mod clean_runs;
 mod normalize_tags;
 mod note_injection;
 mod notes_kind;
@@ -32,6 +33,7 @@ mod rsid_strip;
 mod strip_paragraph_bold;
 mod transplant;
 
+pub use clean_runs::clean_runs;
 pub use error::{Error, Result};
 pub use normalize_tags::normalize_tags;
 pub use note_injection::{inject_footnotes, InjectionReport};

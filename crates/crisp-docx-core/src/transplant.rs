@@ -40,6 +40,7 @@
 
 use std::path::Path;
 
+use crate::clean_runs;
 use crate::error::{Error, Result};
 use crate::ns::{
     CT_ENDNOTES, CT_FOOTNOTES, PART_CONTENT_TYPES, PART_DOCUMENT, PART_DOCUMENT_RELS,
@@ -81,6 +82,13 @@ pub fn transplant_body(blueprint: &mut Package, source: &Package) -> Result<()> 
     // The transplanted runs carry rsids from the source's revision sessions;
     // those won't resolve against the blueprint's settings.xml. Strip them.
     strip_rsids(blueprint)?;
+
+    // Strip non-semantic <w:rPr> children (fonts/sizes/colors/lang/rStyle)
+    // from transplanted runs so the blueprint's styles.xml governs the
+    // visual appearance. Semantic markers (b/i/u/strike/vertAlign/…) are
+    // preserved. Footnote-reference runs are left verbatim. This mirrors
+    // DocumentBuilder._clean_runs in format_transplant.py.
+    clean_runs(blueprint)?;
 
     // Carry footnotes / endnotes if source has them.
     transplant_aux_part(

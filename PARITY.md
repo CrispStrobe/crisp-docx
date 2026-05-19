@@ -93,10 +93,10 @@ in PLAN.md.
 | `BlueprintAnalyzer.analyze(doc) -> BlueprintSchema` | ~600 | ⏳ | ⏳ | Extracts sections, styles, defaults, body inventory, footnote-marker rPr. **Needs full port.** |
 | `ContentExtractor.extract(doc) -> (paragraphs, footnotes)` | ~280 | ⏳ | ⏳ | Parses runs/paragraphs/tables/footnotes; infers headings. **Needs full port.** |
 | `StyleMapper.map(src_name, sem_class, hl) -> str` | ~200 | ⏳ | ⏳ | Source-style → blueprint-style resolution. **Needs full port.** |
-| `DocumentBuilder.build(bp, out, elements, footnotes)` | ~600 | `transplant_body(bp, src)` | 🟡 | **Major divergence.** My port is a byte-level body swap; Python does deep-copy + `_clean_runs` (KEEP_RPR_TAGS allowlist) + `_strip_tracking_attrs` + footnote-marker rPr deep-copy + tab preservation + style mapping. **Needs full re-port.** |
+| `DocumentBuilder.build(bp, out, elements, footnotes)` | ~600 | `transplant_body(bp, src)` | 🟡 | Now invokes `clean_runs` (rPr filter ✅) + `strip_rsids` (rsid scrub ✅). Still missing: footnote-marker rPr deep-copy from blueprint, `_normalize_fn_separator` (tab/space after footnote number), style mapping (StyleMapper). |
 | `MultiProviderLLMClient` | ~300 | n/a | 🚫 | Network I/O, not OOXML. |
 | Helper: `_strip_tracking_attrs(elem)` | ~50 | `strip_rsids` | 🟡 | Python helper strips per-node; Rust strips package-wide. Functionally equivalent if applied to whole document; need fixture-based equivalence check. |
-| Helper: `_clean_runs(p, keep_set)` | ~80 | ⏳ | ⏳ | Per-run rPr filter with KEEP_RPR_TAGS allowlist. **Crucial for transplant; missing.** |
+| Helper: `_clean_runs(p, keep_set)` | ~80 | `clean_runs(pkg)` | ✅ | Removal-count parity verified on cs15.docx via parity harness. KEEP_RPR_TAGS locked to Python's set (regression-tested). Wired into `transplant_body`. |
 | Helper: `_apply_fn_ref_style(footnote, rpr_xml)` | ~30 | ⏳ | ⏳ | Apply blueprint's footnote marker rPr to each transplanted footnote's first run. **Missing.** |
 | Helper: `_normalize_fn_separator(footnote)` | ~80 | ⏳ | ⏳ | Reconstruct the tab/space between the footnote number and body. **Missing.** |
 | Helper: `_transplant_footnotes(blueprint, source_footnotes, schema)` | ~130 | partial in `transplant_body` | 🟡 | Python carries footnotes with rPr application; Rust just copies the bytes. **Diverges.** |

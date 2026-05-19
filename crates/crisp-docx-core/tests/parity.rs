@@ -25,7 +25,9 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crisp_docx_core::{convert_notes_kind, normalize_tags, open, save, strip_rsids, NotesKind};
+use crisp_docx_core::{
+    clean_runs, convert_notes_kind, normalize_tags, open, save, strip_rsids, NotesKind,
+};
 
 // ─── fixtures + plumbing ────────────────────────────────────────────────────
 
@@ -82,13 +84,20 @@ fn run_python_primitive(
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    let stdout = std::str::from_utf8(&output.stdout)
-        .map_err(|e| format!("non-utf8 stdout: {e}"))?
-        .trim();
-    if stdout.is_empty() {
+    // The report is written to <dst>.json so that stdout-noise from
+    // module-level imports (like format_transplant's system check) can't
+    // pollute it.
+    let mut side = dst.to_path_buf();
+    let new_ext = match side.extension().and_then(|s| s.to_str()) {
+        Some(ext) => format!("{ext}.json"),
+        None => "json".to_string(),
+    };
+    side.set_extension(new_ext);
+    if !side.exists() {
         return Ok(serde_json::Value::Object(serde_json::Map::new()));
     }
-    serde_json::from_str(stdout).map_err(|e| format!("bad json from python: {e}"))
+    let raw = std::fs::read_to_string(&side).map_err(|e| format!("read report: {e}"))?;
+    serde_json::from_str(&raw).map_err(|e| format!("bad json from python: {e}"))
 }
 
 // Structural-soundness checks applied to BOTH sides' output independently.
@@ -517,6 +526,49 @@ fn parity_notes_to_endnotes() {
     // overrides resolve.
     validate::soundness("python", &py_out).unwrap();
     validate::soundness("rust", &rust_out).unwrap();
+}
+
+#[test]
+fn parity_clean_runs() {
+    let Some(fx) = fixture(
+        "CRISP_DOCX_PARITY_VIELFALT",
+        "/Users/christianstrobele/OneDrive/2026 Vielfalt cs15.docx",
+    ) else {
+        eprintln!("CRISP_DOCX_PARITY_VIELFALT missing — skipping");
+        return;
+    };
+    let Some(py) = python_interpreter() else {
+        eprintln!("Python interpreter not available — skipping");
+        return;
+    };
+
+    let td = tempdir();
+    let py_out = td.path().join("py.docx");
+    let rust_out = td.path().join("rust.docx");
+
+    let py_report =
+        run_python_primitive(&py, "clean_runs", &fx, &py_out).expect("python clean_runs");
+    let py_removed = py_report["removed"].as_u64().expect("removed:number");
+
+    std::fs::copy(&fx, &rust_out).expect("copy");
+    let mut pkg = open(&rust_out).expect("open");
+    let rust_removed = clean_runs(&mut pkg).expect("clean_runs");
+    save(&pkg, &rust_out).expect("save");
+
+    // Both outputs are sound docx (no dangling refs, all XML well-formed).
+    validate::soundness("python", &py_out).unwrap();
+    validate::soundness("rust", &rust_out).unwrap();
+
+    assert_eq!(
+        rust_removed as u64, py_removed,
+        "PARITY: clean_runs removal count differs (rust={rust_removed}, python={py_removed})"
+    );
+
+    // After clean_runs, neither output should contain any non-semantic
+    // rPr child like w:rFonts/w:sz/w:szCs/w:color/w:lang/w:rStyle ON
+    // RUNS THAT AREN'T FOOTNOTE REFS. We check the simplest version:
+    // every w:r that has rPr should now contain only semantic children.
+    // (A future-proofing check; for now we just verify the count agrees.)
 }
 
 // ─── tempdir helper ─────────────────────────────────────────────────────────

@@ -33,6 +33,18 @@ CRISP_TRANSLATOR = Path(
 sys.path.insert(0, str(CRISP_TRANSLATOR))
 
 
+def _emit(report: dict) -> None:
+    """Write the report JSON.
+
+    `format_transplant` prints a system-check banner to stdout on import,
+    so we can't rely on stdout being clean. The harness expects to read
+    the report from `<dst_path>.json` next to the output docx.
+    """
+    dst = Path(sys.argv[3])
+    side = dst.with_suffix(dst.suffix + ".json")
+    side.write_text(json.dumps(report))
+
+
 def main() -> int:
     if len(sys.argv) < 4:
         print(__doc__, file=sys.stderr)
@@ -45,7 +57,7 @@ def main() -> int:
         shutil.copyfile(src_path, dst_path)
         from rtf_to_docx_endnotes import strip_rsids_from_docx  # type: ignore
         n = strip_rsids_from_docx(dst_path)
-        print(json.dumps({"removed": n}))
+        _emit({"removed": n})
         return 0
 
     if primitive == "normalize_tags":
@@ -53,14 +65,57 @@ def main() -> int:
         # docxtool's normalizer mutates in place and returns the count.
         from docxtool import _normalize_nonstandard_tags  # type: ignore
         n = _normalize_nonstandard_tags(dst_path)
-        print(json.dumps({"renamed": n}))
+        _emit({"renamed": n})
         return 0
 
     if primitive == "notes_to_endnotes":
         shutil.copyfile(src_path, dst_path)
         from rtf_to_docx_endnotes import footnotes_to_endnotes  # type: ignore
         footnotes_to_endnotes(dst_path)
-        print(json.dumps({}))
+        _emit({})
+        return 0
+
+    if primitive == "clean_runs":
+        # Mirror format_transplant.py::DocumentBuilder._clean_runs on the
+        # docx in place. Walk every <w:r> in document.xml, footnotes.xml,
+        # and endnotes.xml; for each non-footnote-ref run, remove rPr
+        # children not in KEEP_RPR_TAGS.
+        import lxml.etree as ET  # type: ignore
+        from format_transplant import KEEP_RPR_TAGS  # type: ignore
+
+        shutil.copyfile(src_path, dst_path)
+        W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+        NS = {"w": W}
+        removed_total = 0
+        with zipfile.ZipFile(dst_path, "r") as zin:
+            parts = {n: zin.read(n) for n in zin.namelist()}
+        for part_name in ("word/document.xml", "word/footnotes.xml",
+                          "word/endnotes.xml"):
+            if part_name not in parts:
+                continue
+            tree = ET.fromstring(parts[part_name])
+            removed = 0
+            for r_elem in tree.iter(f"{{{W}}}r"):
+                # If the run contains a footnote reference, leave it.
+                if r_elem.find(f".//{{{W}}}footnoteReference") is not None:
+                    continue
+                if r_elem.find(f".//{{{W}}}footnoteRef") is not None:
+                    continue
+                rPr = r_elem.find(f"{{{W}}}rPr")
+                if rPr is None:
+                    continue
+                to_remove = [c for c in rPr if c.tag not in KEEP_RPR_TAGS]
+                for child in to_remove:
+                    rPr.remove(child)
+                    removed += 1
+            parts[part_name] = ET.tostring(
+                tree, xml_declaration=True, encoding="UTF-8", standalone=True
+            )
+            removed_total += removed
+        with zipfile.ZipFile(dst_path, "w", zipfile.ZIP_DEFLATED) as zout:
+            for n, b in parts.items():
+                zout.writestr(n, b)
+        _emit({"removed": removed_total})
         return 0
 
     print(f"unknown primitive: {primitive}", file=sys.stderr)
