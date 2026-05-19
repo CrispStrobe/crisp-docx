@@ -115,15 +115,81 @@ fn live_transplant_round_trip() {
     let tmp = std::env::temp_dir().join("crisp_docx_live_transplant.docx");
     std::fs::copy(&bp_path, &tmp).expect("copy blueprint");
 
+    // Capture blueprint + source bytes before transplanting so we can
+    // assert the right parts survived in the output.
+    let bp_pre = open(&bp_path).expect("open blueprint pre");
+    let src_pre = open(&src_path).expect("open source pre");
+    let bp_styles = bp_pre.get_part("word/styles.xml").map(<[u8]>::to_vec);
+    let src_footnotes = src_pre.get_part("word/footnotes.xml").map(<[u8]>::to_vec);
+
     let mut bp = open(&tmp).expect("open blueprint");
     let src = open(&src_path).expect("open source");
     transplant_body(&mut bp, &src).expect("transplant_body");
     save(&bp, &tmp).expect("save");
 
-    // Reopen and verify it's still a usable package.
-    let reopened = open(&tmp).expect("reopen");
-    assert!(reopened.parts().count() > 0);
+    // Re-open and assert structural invariants.
+    let out = open(&tmp).expect("reopen");
+    assert!(out.parts().count() > 0);
+
+    // The blueprint's styles should be preserved verbatim.
+    if let Some(want) = &bp_styles {
+        let got = out
+            .get_part("word/styles.xml")
+            .expect("output missing styles.xml");
+        assert_eq!(got, want.as_slice(), "blueprint styles.xml was modified");
+    }
+
+    // The source's footnotes (if any) should be carried over verbatim.
+    if let Some(want) = &src_footnotes {
+        let got = out
+            .get_part("word/footnotes.xml")
+            .expect("output missing footnotes.xml after transplant from a source that had them");
+        assert_eq!(got, want.as_slice(), "source footnotes.xml not carried");
+    }
+
+    // The body must contain exactly one body-direct sectPr — blueprint's —
+    // and every <w:footnoteReference> in the body must resolve to a
+    // <w:footnote> with the same id in word/footnotes.xml.
+    let doc = std::str::from_utf8(out.get_part("word/document.xml").unwrap()).unwrap();
+    let body_close = doc.find("</w:body>").expect("no </w:body>");
+    let body = &doc[..body_close];
+    let sectpr_count = body.matches("<w:sectPr").count();
+    assert_eq!(
+        sectpr_count, 1,
+        "expected exactly one body-direct sectPr, found {sectpr_count}"
+    );
+
+    if let Some(fn_bytes) = out.get_part("word/footnotes.xml") {
+        let fn_str = std::str::from_utf8(fn_bytes).unwrap();
+        let ref_ids: std::collections::HashSet<&str> = collect_attr(body, "w:footnoteReference");
+        let def_ids: std::collections::HashSet<&str> = collect_attr(fn_str, "w:footnote");
+        for r in &ref_ids {
+            assert!(
+                def_ids.contains(r),
+                "body cites footnote w:id={r:?} but no matching <w:footnote> exists"
+            );
+        }
+    }
+
     let _ = std::fs::remove_file(&tmp);
+}
+
+fn collect_attr<'a>(haystack: &'a str, elem: &str) -> std::collections::HashSet<&'a str> {
+    let mut out = std::collections::HashSet::new();
+    let needle_open = format!("<{elem} ");
+    let mut i = 0;
+    while let Some(rel) = haystack[i..].find(&needle_open) {
+        let start = i + rel;
+        let rest = &haystack[start..];
+        if let Some(id_off) = rest.find(r#"w:id=""#) {
+            let after = &rest[id_off + 6..];
+            if let Some(end) = after.find('"') {
+                out.insert(&after[..end]);
+            }
+        }
+        i = start + needle_open.len();
+    }
+    out
 }
 
 #[test]
