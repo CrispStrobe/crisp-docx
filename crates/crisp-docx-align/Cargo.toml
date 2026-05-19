@@ -1,0 +1,34 @@
+[package]
+name        = "crisp-docx-align"
+version     = "0.1.0"
+edition     = "2021"
+description = "Offline word/token aligner — SimAlign-style argmax+intersection over CrispEmbed contextual token embeddings."
+license     = { workspace = true }
+repository  = { workspace = true }
+
+[lib]
+name = "crisp_docx_align"
+
+[features]
+default = []
+# When enabled, depend on the local CrispEmbed Rust crate. Off by default
+# because building the crate compiles the C++ ggml runtime, which adds
+# minutes to a fresh build — and most consumers only want the algorithm
+# layer, with embeddings provided externally (e.g., from Python).
+crispembed = ["dep:crispembed"]
+
+[dependencies]
+serde      = { workspace = true, optional = true }
+thiserror  = { workspace = true }
+
+# Bring in CrispEmbed via path — the assumption is `CrispEmbed/` is a
+# sibling checkout. Mirrors what we do for the CrispTranslator parity
+# harness: a developer-local dependency, not an over-the-net crate.
+crispembed = { path = "../../../CrispEmbed/crispembed", version = "0.4", optional = true }
+
+[dev-dependencies]
+crispembed = { path = "../../../CrispEmbed/crispembed", version = "0.4" }
+
+[[example]]
+name              = "align_smoke"
+required-features = ["crispembed"]

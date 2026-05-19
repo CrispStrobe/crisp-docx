@@ -31,6 +31,18 @@ bytes. Out-of-scope for now (deliberate, see [PLAN.md](PLAN.md) phase E+):
 - Pandoc subprocess orchestration. Pandoc is an external tool; Rust ports
   call the same binary the same way (when needed).
 
+### Reclassified ✅ (2026-05-19)
+
+- **SimAlign-style transformer alignment** was previously listed under
+  "huge mature Python ecosystems" — but with the addition of
+  `crispembed_encode_tokens` to [CrispEmbed](https://github.com/CrispStrobe/CrispEmbed)
+  the Rust ecosystem now has a working encoder. The aligner algorithm
+  itself (argmax + intersection + itermax) is pure linear algebra and
+  is now ported in [`crisp-docx-align`](crates/crisp-docx-align/).
+  Live-tested against `paraphrase-multilingual-MiniLM-L12-v2` on
+  en↔de sentence pairs; produces transformer-grade word alignments
+  with no Python runtime. See the row below.
+
 If the user later wants those ported too, they each get their own phase
 in PLAN.md.
 
@@ -85,6 +97,20 @@ in PLAN.md.
 | `cmd_compare(args)` | 951:660 | ⏳ | ⏳ | Side-by-side style/structure comparison of two docx. |
 | `cmd_styles(args)` | 951:760 | ⏳ | ⏳ | Full style dump. |
 | `cmd_xml(args)` | 951:795 | ⏳ | ⏳ | Pretty-print a ZIP part. |
+
+## translator.py (NEW row — was previously 🚫 across the board)
+
+| Python primitive | Lines | Rust equivalent | Status | Parity criterion |
+|---|---|---|---|---|
+| `SimAlignAligner` (Python, depends on transformers + simalign) | ~30 | `crisp-docx-align` crate (`align_texts`, `Strategy::{Intersection, Itermax}`) | ✅ | Pure-Rust SimAlign argmax+intersection / itermax over per-token embeddings from CrispEmbed's `encode_tokens` API. Verified live against `paraphrase-multilingual-MiniLM-L12-v2`: `dog↔Hund` 0.99, `classical↔klassischen`, `final↔letzte`, `religious↔religiösen`, `matters↔Fragen`. 12 algorithm-layer unit tests + live smoke example. |
+| `AwesomeAlignAligner` | ~70 | (same primitive — different model) | 🟡 | Same algorithm; just point at an mBERT GGUF in CrispEmbed's registry when those land. No new code needed. |
+| `FastAlignAligner` (subprocess to fast_align C binary) | ~80 | n/a — superseded | 🚫 | Statistical IBM-2 aligner. Lower quality than the transformer aligner that's now available; no need to port. |
+| `HeuristicAligner` (length-ratio fallback) | ~20 | not yet | ⏳ | Trivial to port. Defer until a real consumer asks. |
+| `LindatAligner` (HTTP API call) | ~40 | n/a | 🚫 | Online aligner; orthogonal to the offline path. |
+| `MultiAligner` (orchestrator) | ~80 | n/a (orchestrator) | 🚫 | Composes the others. Caller-level concern. |
+| NMT backends (NLLB / OpusMT / Madlad400 / CTranslate2) | ~600 | n/a | 🚫 | Requires PyTorch / HF transformers / ctranslate2 — Rust has no comparable model coverage. |
+| `LLMTranslator` (OpenAI / Anthropic / Ollama / Groq HTTP clients) | ~300 | not yet | ⏳ | Thin REST wrappers, ~600 LOC of Rust + reqwest if/when wanted. |
+| `UltimateDocumentTranslator` (orchestrator) | ~580 | not yet | ⏳ | Composes the above. Wait until LLM clients land. |
 
 ## format_transplant.py
 
