@@ -13,8 +13,9 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use crisp_docx_core::{
-    convert_notes_kind, inject_footnotes, normalize_tags, open, save, strip_rsids, transplant_body,
-    NotesKind,
+    analyze_blueprint, apply_heading_inferences, convert_notes_kind, infer_heading_levels,
+    inject_footnotes, normalize_tags, open, save, strip_paragraph_bold, strip_rsids,
+    transplant_body, NotesKind, StyleIndex,
 };
 
 #[derive(Parser)]
@@ -42,6 +43,15 @@ enum Cmd {
 
     /// Transplant a source's body into a blueprint's package.
     Transplant(TransplantArgs),
+
+    /// Strip cosmetic whole-paragraph bold from body paragraphs.
+    StripParagraphBold(SingleFileArgs),
+
+    /// Print blueprint metadata (page size, default font, styles, fn format).
+    Analyze(SingleFileArgs),
+
+    /// Detect heading levels from direct formatting; optionally apply.
+    InferHeadings(InferHeadingsArgs),
 
     /// Print a human-readable summary of the package's parts.
     Inspect(InspectArgs),
@@ -99,6 +109,35 @@ struct TransplantArgs {
 }
 
 #[derive(clap::Args)]
+struct SingleFileArgs {
+    /// Path to the input .docx file.
+    input: PathBuf,
+    /// Output path. Defaults to editing input in place (or — for `analyze` —
+    /// printing to stdout without writing).
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(clap::Args)]
+struct InferHeadingsArgs {
+    /// Path to the input .docx file (e.g. the post-transplant document).
+    input: PathBuf,
+    /// Optional source docx — used to translate source styleIds to
+    /// display names before classification.
+    #[arg(long)]
+    source: Option<PathBuf>,
+    /// Optional blueprint docx — when provided, the inferred headings
+    /// are *applied* (the input's pStyle refs get rewritten to the
+    /// blueprint's matching heading styleId).
+    #[arg(long)]
+    apply_to_blueprint: Option<PathBuf>,
+    /// Output path when `--apply-to-blueprint` is set. Defaults to
+    /// editing the input in place.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+}
+
+#[derive(clap::Args)]
 struct InspectArgs {
     /// Path to the input .docx file.
     input: PathBuf,
@@ -131,6 +170,9 @@ fn main() -> Result<()> {
         Cmd::NotesKind(args) => cmd_notes_kind(args),
         Cmd::InjectFootnotes(args) => cmd_inject_footnotes(args),
         Cmd::Transplant(args) => cmd_transplant(args),
+        Cmd::StripParagraphBold(args) => cmd_strip_paragraph_bold(args),
+        Cmd::Analyze(args) => cmd_analyze(args),
+        Cmd::InferHeadings(args) => cmd_infer_headings(args),
         Cmd::Inspect(args) => cmd_inspect(args),
     }
 }
@@ -229,6 +271,86 @@ fn cmd_transplant(args: TransplantArgs) -> Result<()> {
         args.blueprint.display(),
         args.output.display()
     );
+    Ok(())
+}
+
+fn cmd_strip_paragraph_bold(args: SingleFileArgs) -> Result<()> {
+    let mut pkg = open(&args.input).with_context(|| format!("opening {}", args.input.display()))?;
+    let n = strip_paragraph_bold(&mut pkg)?;
+    let out = args.output.as_deref().unwrap_or(args.input.as_path());
+    save(&pkg, out)?;
+    println!("unbolded {n} paragraphs -> {}", out.display());
+    Ok(())
+}
+
+fn cmd_analyze(args: SingleFileArgs) -> Result<()> {
+    let pkg = open(&args.input).with_context(|| format!("opening {}", args.input.display()))?;
+    let s = analyze_blueprint(&pkg)?;
+    println!("{}", args.input.display());
+    println!(
+        "  default font: {} @ {} pt",
+        s.default_font, s.default_font_size_pt
+    );
+    println!("  sections: {}", s.sections.len());
+    for sec in &s.sections {
+        match (sec.page_width_pt, sec.page_height_pt) {
+            (Some(w), Some(h)) => println!(
+                "    #{} {:.0}×{:.0} pt  L:{:?} R:{:?} T:{:?} B:{:?}",
+                sec.index,
+                w,
+                h,
+                sec.left_margin_pt,
+                sec.right_margin_pt,
+                sec.top_margin_pt,
+                sec.bottom_margin_pt,
+            ),
+            _ => println!("    #{} (no page geometry — Word defaults)", sec.index),
+        }
+    }
+    println!(
+        "  styles: {} entries, {} body styles in use",
+        s.styles.styles.len(),
+        s.styles.body_para_style_names.len(),
+    );
+    println!(
+        "  footnote format: marker_rpr={}  separator={:?}",
+        s.footnote_format.marker_rpr_xml.is_some(),
+        s.footnote_format.separator,
+    );
+    Ok(())
+}
+
+fn cmd_infer_headings(args: InferHeadingsArgs) -> Result<()> {
+    let mut pkg = open(&args.input).with_context(|| format!("opening {}", args.input.display()))?;
+    let source_styles = match &args.source {
+        Some(p) => {
+            let src = open(p).with_context(|| format!("opening source {}", p.display()))?;
+            Some(StyleIndex::from_package(&src)?)
+        }
+        None => None,
+    };
+    let inferences = infer_heading_levels(&pkg, source_styles.as_ref())?;
+    println!(
+        "inferred {} heading(s) from {}:",
+        inferences.len(),
+        args.input.display()
+    );
+    for inf in &inferences {
+        println!(
+            "  para #{:4}  level {}  size {:.1}pt  {:?}",
+            inf.paragraph_index, inf.heading_level, inf.effective_size_pt, inf.preview
+        );
+    }
+
+    if let Some(bp_path) = &args.apply_to_blueprint {
+        let bp =
+            open(bp_path).with_context(|| format!("opening blueprint {}", bp_path.display()))?;
+        let bp_idx = StyleIndex::from_package(&bp)?;
+        let n = apply_heading_inferences(&mut pkg, &inferences, &bp_idx)?;
+        let out = args.output.as_deref().unwrap_or(args.input.as_path());
+        save(&pkg, out)?;
+        println!("applied {n} heading(s) -> {}", out.display());
+    }
     Ok(())
 }
 

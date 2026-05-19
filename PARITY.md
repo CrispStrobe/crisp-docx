@@ -95,7 +95,7 @@ in PLAN.md.
 | `ContentExtractor._infer_headings(elements)` | ~100 | `infer_heading_levels(pkg, source_styles)` + `apply_heading_inferences(pkg, inferences, bp_index)` | ✅ | Bold + short-text + font-size clustering verbatim. 6 unit tests cover: no-candidates, single-level-1, multi-size clustering, skip-already-heading, skip-long-text, pPr-default-bold-propagates. |
 | `ContentExtractor.extract / _para / _run / _body / _footnotes` | ~180 | ⏳ | ⏳ | The data-model layer above _infer_headings (ParagraphData / RunData). Heading inference now ported standalone — the rest is mostly Python's intermediate representation, of limited value in the docx-direct Rust pipeline. |
 | `StyleMapper.map(src_name, sem_class, hl) -> str` | ~200 | `StyleMapper::map` | ✅ | All 6 resolution-order branches ported (user override, semantic-heading-before-name, exact, case-insensitive, semantic class, body fallback) with 9 unit tests covering each branch. |
-| `DocumentBuilder.build(bp, out, elements, footnotes)` | ~600 | `transplant_body(bp, src)` | 🟡 | Now invokes `clean_runs` (rPr filter ✅) + `strip_rsids` (rsid scrub ✅). Still missing: footnote-marker rPr deep-copy from blueprint, `_normalize_fn_separator` (tab/space after footnote number), style mapping (StyleMapper). |
+| `DocumentBuilder.build(bp, out, elements, footnotes)` | ~600 | `transplant_body(bp, src)` | 🟡 | Now invokes `clean_runs` + `strip_rsids` + `apply_footnote_format` + `apply_style_mapping` (the four heavy passes). Still missing: heading inference is *available* (`infer_heading_levels` + `apply_heading_inferences`) but not auto-invoked by `transplant_body` — caller composes; see PyO3/CLI surface. |
 | `MultiProviderLLMClient` | ~300 | n/a | 🚫 | Network I/O, not OOXML. |
 | Helper: `_strip_tracking_attrs(elem)` | ~50 | `strip_rsids` | 🟡 | Python helper strips per-node; Rust strips package-wide. Functionally equivalent if applied to whole document; need fixture-based equivalence check. |
 | Helper: `_clean_runs(p, keep_set)` | ~80 | `clean_runs(pkg)` | ✅ | Removal-count parity verified on cs15.docx via parity harness. KEEP_RPR_TAGS locked to Python's set (regression-tested). Wired into `transplant_body`. |
@@ -200,6 +200,26 @@ preserved in the output. Need to port `_clean_runs`.
 This file is the ledger. The harness is `tests/parity.rs` (see next commit).
 Until it lands, all "✅" claims should be read as "best-effort, not verified
 by a side-by-side run."
+
+---
+
+## PyO3 / CLI surface (2026-05-19)
+
+All currently-ported primitives are now reachable both from Python and from
+the shell. Smoke-tested live against `2026 Vielfalt cs15.docx`:
+
+| Operation | Python (`crisp_docx.*`) | CLI (`crisp-docx …`) |
+|---|---|---|
+| Strip rsid/paraId | `strip_rsids(path, output=)` | `clean` |
+| Normalize textutil tags | `normalize_tags(path, output=)` | `clean --also-normalize-tags` |
+| Convert notes kind | `convert_notes_kind(path, target)` | `notes-kind --to {footnotes,endnotes}` |
+| Inject `[N]` footnotes | `inject_footnotes(path, notes)` | `inject-footnotes --notes notes.json` |
+| Transplant body | `transplant_body(bp, src, out)` | `transplant <bp> <src> -o <out>` |
+| Strip whole-paragraph bold | `strip_paragraph_bold(path)` | `strip-paragraph-bold` |
+| Clean run rPr | `clean_runs(path)` | (composed inside transplant) |
+| Analyze blueprint | `analyze_blueprint(path) -> dict` | `analyze` |
+| Apply style mapping | `apply_style_mapping(path, bp, src=)` | (composed inside transplant) |
+| Infer heading levels | `infer_heading_levels(path, source=, apply_to_blueprint=)` | `infer-headings [--apply-to-blueprint]` |
 
 ---
 
