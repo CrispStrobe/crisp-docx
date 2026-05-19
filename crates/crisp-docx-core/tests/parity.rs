@@ -64,6 +64,18 @@ fn python_interpreter() -> Option<PathBuf> {
     None
 }
 
+/// True iff a CrispTranslator checkout is reachable. Without it the
+/// run_python.py shim can't `import format_transplant` / `import
+/// debug_format`, so any parity test that needs Python primitives
+/// would fail spuriously. CI runners that haven't cloned both repos
+/// (or set `CRISP_TRANSLATOR_DIR`) skip these tests.
+fn crisp_translator_available() -> bool {
+    let dir = std::env::var("CRISP_TRANSLATOR_DIR")
+        .map(|s| expand_tilde(&s))
+        .unwrap_or_else(|_| expand_tilde("~/code/CrispTranslator"));
+    Path::new(&dir).join("format_transplant.py").exists()
+}
+
 fn run_python_primitive(
     py: &Path,
     primitive: &str,
@@ -407,6 +419,10 @@ fn parity_strip_rsids() {
         eprintln!("Python interpreter not available — skipping");
         return;
     };
+    if !crisp_translator_available() {
+        eprintln!("CrispTranslator checkout not available — skipping");
+        return;
+    }
 
     let td = tempdir();
     let py_out = td.path().join("py.docx");
@@ -460,6 +476,10 @@ fn parity_normalize_tags() {
         eprintln!("Python interpreter not available — skipping");
         return;
     };
+    if !crisp_translator_available() {
+        eprintln!("CrispTranslator checkout not available — skipping");
+        return;
+    }
 
     let td = tempdir();
     let py_out = td.path().join("py.docx");
@@ -497,6 +517,10 @@ fn parity_notes_to_endnotes() {
         eprintln!("Python interpreter not available — skipping");
         return;
     };
+    if !crisp_translator_available() {
+        eprintln!("CrispTranslator checkout not available — skipping");
+        return;
+    }
 
     let td = tempdir();
     let py_out = td.path().join("py.docx");
@@ -542,6 +566,10 @@ fn parity_clean_runs() {
         eprintln!("Python interpreter not available — skipping");
         return;
     };
+    if !crisp_translator_available() {
+        eprintln!("CrispTranslator checkout not available — skipping");
+        return;
+    }
 
     let td = tempdir();
     let py_out = td.path().join("py.docx");
@@ -578,6 +606,10 @@ fn parity_classify_style() {
         eprintln!("Python interpreter not available — skipping");
         return;
     };
+    if !crisp_translator_available() {
+        eprintln!("CrispTranslator checkout not available — skipping");
+        return;
+    }
     // Sample of style names spanning every branch of the classifier —
     // English headings, multilingual headings, regex fallback, title,
     // body, footnote, caption, blockquote, abstract, unknown.
@@ -668,6 +700,10 @@ fn parity_check_package() {
         eprintln!("Python interpreter not available — skipping");
         return;
     };
+    if !crisp_translator_available() {
+        eprintln!("CrispTranslator checkout not available — skipping");
+        return;
+    }
 
     let td = tempdir();
     let unused = td.path().join("check.docx");
