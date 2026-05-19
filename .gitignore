@@ -1,0 +1,23 @@
+/target
+/Cargo.lock                # generated; checked in only for the workspace, see below
+**/*.rs.bk
+*.profraw
+
+# PyO3 / maturin artifacts
+*.so
+*.pyd
+*.dylib
+**/__pycache__/
+**/*.egg-info/
+**/dist/
+**/build/
+.venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp

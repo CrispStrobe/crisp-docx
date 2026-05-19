@@ -1,0 +1,62 @@
+# crisp-docx workspace.
+#
+# Cross-platform OOXML (.docx) surgery. Started life as the Rust port of
+# CrispStrobe/CrispTranslator's format_transplant.py + docxtool — the
+# operations that make Word docx files survive grafts, recoveries, and
+# format transplants. Sister project to CrispStrobe/CrispSorter, where it
+# slots into the Tauri workspace as just another dep.
+#
+# Members:
+#   - crisp-docx-core  pure Rust library: zip + XML primitives, no UI, no async
+#   - crisp-docx-cli   thin clap wrapper -> single ~10 MB binary
+#   - crisp-docx-py    PyO3 bindings so existing Python tools keep working
+#                       (maturin-built wheel)
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/crisp-docx-core",
+    "crates/crisp-docx-cli",
+    "crates/crisp-docx-py",
+]
+
+[workspace.package]
+version      = "0.1.0"
+edition      = "2021"
+rust-version = "1.75"
+authors      = ["CrispStrobe"]
+license      = "AGPL-3.0-or-later"
+repository   = "https://github.com/CrispStrobe/crisp-docx"
+homepage     = "https://github.com/CrispStrobe/crisp-docx"
+readme       = "README.md"
+keywords     = ["docx", "ooxml", "office", "word", "footnotes"]
+categories   = ["text-processing", "filesystem"]
+
+[workspace.dependencies]
+crisp-docx-core = { path = "crates/crisp-docx-core", version = "0.1.0" }
+
+# XML
+quick-xml = { version = "0.36", features = ["serialize"] }
+
+# Zip (the OOXML container)
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+# Errors / utility
+thiserror = "1"
+anyhow    = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing            = "0.1"
+tracing-subscriber = "0.3"
+
+# PyO3
+pyo3 = { version = "0.22", features = ["extension-module"] }
+
+[profile.release]
+lto             = "thin"
+codegen-units   = 1
+strip           = true
+opt-level       = 3
