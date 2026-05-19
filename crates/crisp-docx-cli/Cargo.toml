@@ -1,0 +1,22 @@
+[package]
+name        = "crisp-docx-cli"
+description = "Cross-platform CLI for OOXML (.docx) surgery — wraps crisp-docx-core."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+authors.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+readme.workspace       = true
+
+[[bin]]
+name = "crisp-docx"
+path = "src/main.rs"
+
+[dependencies]
+crisp-docx-core    = { workspace = true }
+clap               = { workspace = true }
+anyhow             = { workspace = true }
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

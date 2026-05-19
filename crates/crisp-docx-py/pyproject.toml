@@ -1,0 +1,30 @@
+[build-system]
+requires      = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name        = "crisp-docx"
+version     = "0.1.0"
+description = "Python bindings for crisp-docx-core (Rust OOXML surgery)."
+readme      = "../../README.md"
+license     = { text = "AGPL-3.0-or-later" }
+authors     = [{ name = "CrispStrobe" }]
+requires-python = ">=3.10"
+keywords    = ["docx", "ooxml", "office", "word"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Rust",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: OS Independent",
+    "Topic :: Text Processing",
+]
+
+[project.urls]
+Homepage   = "https://github.com/CrispStrobe/crisp-docx"
+Repository = "https://github.com/CrispStrobe/crisp-docx"
+
+[tool.maturin]
+module-name        = "crisp_docx"
+manifest-path      = "Cargo.toml"
+features           = ["pyo3/extension-module"]
+strip              = true

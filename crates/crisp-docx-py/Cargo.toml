@@ -1,0 +1,19 @@
+[package]
+name        = "crisp-docx-py"
+description = "Python bindings (PyO3) for crisp-docx-core."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+authors.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+
+[lib]
+name       = "crisp_docx"
+crate-type = ["cdylib"]
+path       = "src/lib.rs"
+
+[dependencies]
+crisp-docx-core = { workspace = true }
+pyo3            = { workspace = true }
