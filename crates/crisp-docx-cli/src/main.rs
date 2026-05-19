@@ -7,11 +7,14 @@
 //! - `notes-kind` — convert footnotes to endnotes or back.
 //! - `inspect` — human-readable summary of a package.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
-use crisp_docx_core::{convert_notes_kind, normalize_tags, open, save, strip_rsids, NotesKind};
+use crisp_docx_core::{
+    convert_notes_kind, inject_footnotes, normalize_tags, open, save, strip_rsids, NotesKind,
+};
 
 #[derive(Parser)]
 #[command(name = "crisp-docx", about, version, long_about = None)]
@@ -32,6 +35,9 @@ enum Cmd {
 
     /// Convert a docx between footnotes and endnotes.
     NotesKind(NotesKindArgs),
+
+    /// Inject Word footnote references at every inline `[N]` marker.
+    InjectFootnotes(InjectArgs),
 
     /// Print a human-readable summary of the package's parts.
     Inspect(InspectArgs),
@@ -65,6 +71,19 @@ struct NotesKindArgs {
 }
 
 #[derive(clap::Args)]
+struct InjectArgs {
+    /// Path to the input .docx file.
+    input: PathBuf,
+    /// Output path. Defaults to editing the input in place.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+    /// Path to a JSON file mapping note number (string) to note text.
+    /// Example: `{"1": "first note", "2": "second note"}`.
+    #[arg(long)]
+    notes: PathBuf,
+}
+
+#[derive(clap::Args)]
 struct InspectArgs {
     /// Path to the input .docx file.
     input: PathBuf,
@@ -95,6 +114,7 @@ fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Clean(args) => cmd_clean(args),
         Cmd::NotesKind(args) => cmd_notes_kind(args),
+        Cmd::InjectFootnotes(args) => cmd_inject_footnotes(args),
         Cmd::Inspect(args) => cmd_inspect(args),
     }
 }
@@ -138,6 +158,45 @@ fn cmd_notes_kind(args: NotesKindArgs) -> Result<()> {
     let out = args.output.as_deref().unwrap_or(args.input.as_path());
     save(&pkg, out)?;
     println!("converted notes to {:?} -> {}", args.to, out.display());
+    Ok(())
+}
+
+fn cmd_inject_footnotes(args: InjectArgs) -> Result<()> {
+    let notes_json = std::fs::read_to_string(&args.notes)
+        .with_context(|| format!("reading {}", args.notes.display()))?;
+    let raw: BTreeMap<String, String> = serde_json::from_str(&notes_json)
+        .with_context(|| format!("parsing {} as JSON", args.notes.display()))?;
+    let mut notes: BTreeMap<u32, String> = BTreeMap::new();
+    for (k, v) in raw {
+        let n: u32 = k
+            .parse()
+            .with_context(|| format!("note key {k:?} is not a non-negative integer"))?;
+        notes.insert(n, v);
+    }
+    // Build a view of (&u32, &str) without cloning.
+    let view: BTreeMap<u32, &str> = notes.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
+    let mut pkg = open(&args.input).with_context(|| format!("opening {}", args.input.display()))?;
+    let report = inject_footnotes(&mut pkg, &view)?;
+    let out = args.output.as_deref().unwrap_or(args.input.as_path());
+    save(&pkg, out)?;
+    println!(
+        "injected {} footnote references -> {}",
+        report.inserted,
+        out.display()
+    );
+    if !report.unused_ids.is_empty() {
+        eprintln!(
+            "warning: notes provided but never cited in body: {:?}",
+            report.unused_ids
+        );
+    }
+    if !report.unknown_ids.is_empty() {
+        eprintln!(
+            "warning: body cites note IDs with no matching definition: {:?}",
+            report.unknown_ids
+        );
+    }
     Ok(())
 }
 

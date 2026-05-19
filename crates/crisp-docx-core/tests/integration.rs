@@ -6,7 +6,11 @@
 
 mod common;
 
-use crisp_docx_core::{convert_notes_kind, normalize_tags, strip_rsids, NotesKind, Package};
+use std::collections::BTreeMap;
+
+use crisp_docx_core::{
+    convert_notes_kind, inject_footnotes, normalize_tags, strip_rsids, NotesKind, Package,
+};
 
 fn part_str<'a>(pkg: &'a Package, name: &str) -> &'a str {
     std::str::from_utf8(pkg.get_part(name).expect("part missing")).expect("non-utf8 part")
@@ -120,6 +124,65 @@ fn convert_noop_when_already_target() {
     // Still has footnotes, no endnotes.
     assert!(pkg.get_part("word/footnotes.xml").is_some());
     assert!(pkg.get_part("word/endnotes.xml").is_none());
+}
+
+#[test]
+fn inject_footnotes_creates_part_and_rewrites_runs() {
+    let mut pkg = Package::from_bytes(&common::docx_with_inline_markers()).unwrap();
+    let mut notes: BTreeMap<u32, &str> = BTreeMap::new();
+    notes.insert(1, "Note one.");
+    notes.insert(2, "Note two.");
+
+    let report = inject_footnotes(&mut pkg, &notes).unwrap();
+    assert_eq!(report.inserted, 2);
+    assert!(report.unknown_ids.is_empty());
+    assert!(report.unused_ids.is_empty());
+
+    // Document body now references both notes.
+    let doc = part_str(&pkg, "word/document.xml");
+    assert!(doc.contains(r#"w:id="1""#));
+    assert!(doc.contains(r#"w:id="2""#));
+    assert!(doc.contains("w:footnoteReference"));
+    assert!(doc.contains("FootnoteReference"));
+    // Inline brackets gone.
+    assert!(!doc.contains("[1]"));
+    assert!(!doc.contains("[2]"));
+
+    // Footnotes part exists with the entries plus the two separators.
+    let fn_part = part_str(&pkg, "word/footnotes.xml");
+    assert!(fn_part.contains(r#"w:id="-1""#));
+    assert!(fn_part.contains(r#"w:id="0""#));
+    assert!(fn_part.contains(r#"w:id="1""#));
+    assert!(fn_part.contains(r#"w:id="2""#));
+    assert!(fn_part.contains("Note one."));
+    assert!(fn_part.contains("Note two."));
+
+    // Content-types + rels patched.
+    let ct = part_str(&pkg, "[Content_Types].xml");
+    assert!(ct.contains("/word/footnotes.xml"));
+    assert!(ct.contains("wordprocessingml.footnotes+xml"));
+
+    let rels = part_str(&pkg, "word/_rels/document.xml.rels");
+    assert!(rels.contains("relationships/footnotes"));
+    assert!(rels.contains(r#"Target="footnotes.xml""#));
+}
+
+#[test]
+fn inject_footnotes_reports_unknown_and_unused() {
+    let mut pkg = Package::from_bytes(&common::docx_with_inline_markers()).unwrap();
+    let mut notes: BTreeMap<u32, &str> = BTreeMap::new();
+    notes.insert(1, "Note one.");
+    // [2] is in the body but not in `notes`.
+    notes.insert(99, "Never used.");
+
+    let report = inject_footnotes(&mut pkg, &notes).unwrap();
+    assert_eq!(report.inserted, 1);
+    assert_eq!(report.unknown_ids, Vec::<u32>::new()); // [2] isn't *seen* by find_first_marker because it's not in `notes`
+    assert_eq!(report.unused_ids, vec![99]);
+
+    // The body still contains the unmatched [2] verbatim.
+    let doc = part_str(&pkg, "word/document.xml");
+    assert!(doc.contains("[2]"));
 }
 
 #[test]

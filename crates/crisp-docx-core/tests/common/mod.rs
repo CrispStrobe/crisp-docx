@@ -25,6 +25,20 @@ pub fn docx_with_textutil_tags() -> Vec<u8> {
     ])
 }
 
+/// Make a docx with inline `[N]` markers in the body and no footnotes part.
+/// Useful for testing note injection from scratch.
+pub fn docx_with_inline_markers() -> Vec<u8> {
+    let body =
+        br#"<w:p><w:r><w:t xml:space="preserve">opener.[1] middle.[2] end.</w:t></w:r></w:p>"#;
+    zip_package(&[
+        ("[Content_Types].xml", CONTENT_TYPES_MINIMAL.as_bytes()),
+        ("word/document.xml", &build_document(body)),
+        ("word/_rels/document.xml.rels", EMPTY_RELS.as_bytes()),
+    ])
+}
+
+const EMPTY_RELS: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#;
+
 /// Make a docx with a working footnotes part (id=1) referenced from the body.
 pub fn docx_with_footnotes() -> Vec<u8> {
     let body = br#"<w:p><w:r><w:t xml:space="preserve">Body. </w:t></w:r><w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteReference w:id="1"/></w:r><w:r><w:t xml:space="preserve"> after.</w:t></w:r></w:p>"#;

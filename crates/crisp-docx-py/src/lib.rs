@@ -11,14 +11,15 @@
 // don't control.
 #![allow(clippy::useless_conversion)]
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
 use crisp_docx_core::{
-    convert_notes_kind as core_convert, normalize_tags as core_normalize, open, save,
-    strip_rsids as core_strip, NotesKind,
+    convert_notes_kind as core_convert, inject_footnotes as core_inject,
+    normalize_tags as core_normalize, open, save, strip_rsids as core_strip, NotesKind,
 };
 
 #[pyclass(eq, eq_int)]
@@ -78,6 +79,24 @@ fn convert_notes_kind(path: PathBuf, target: PyNotesKind, output: Option<PathBuf
     Ok(())
 }
 
+/// Inject Word footnote references at every inline `[N]` marker in the
+/// document body. `notes` is a `Dict[int, str]` mapping note number to
+/// note body text. Returns a `(inserted, unknown_ids, unused_ids)` tuple.
+#[pyfunction]
+#[pyo3(signature = (path, notes, output=None))]
+fn inject_footnotes(
+    path: PathBuf,
+    notes: BTreeMap<u32, String>,
+    output: Option<PathBuf>,
+) -> PyResult<(usize, Vec<u32>, Vec<u32>)> {
+    let mut pkg = open(&path).map_err(map_err)?;
+    let view: BTreeMap<u32, &str> = notes.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    let report = core_inject(&mut pkg, &view).map_err(map_err)?;
+    let dest = output.unwrap_or(path);
+    save(&pkg, &dest).map_err(map_err)?;
+    Ok((report.inserted, report.unknown_ids, report.unused_ids))
+}
+
 /// `crisp_docx` Python module.
 #[pymodule]
 fn crisp_docx(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -86,5 +105,6 @@ fn crisp_docx(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(strip_rsids, m)?)?;
     m.add_function(wrap_pyfunction!(normalize_tags, m)?)?;
     m.add_function(wrap_pyfunction!(convert_notes_kind, m)?)?;
+    m.add_function(wrap_pyfunction!(inject_footnotes, m)?)?;
     Ok(())
 }
