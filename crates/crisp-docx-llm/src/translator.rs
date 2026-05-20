@@ -110,6 +110,11 @@ impl LlmTranslator {
     /// per-batch — i.e. one string might land on OpenAI while another
     /// falls through to Ollama. The order of the returned vec matches
     /// the input.
+    ///
+    /// Uses `join_all`, which is unbounded (every paragraph starts at
+    /// once). For most workloads that's fine because LLM provider
+    /// concurrency limits gate it server-side. For bounded fan-out
+    /// see [`Self::translate_batch_bounded`].
     pub async fn translate_batch(
         &self,
         texts: &[String],
@@ -120,6 +125,30 @@ impl LlmTranslator {
             .iter()
             .map(|t| async move { self.translate_text(t, src_lang, tgt_lang).await });
         futures::future::join_all(futures).await
+    }
+
+    /// Translate many strings with at most `concurrency` in-flight at
+    /// a time. **Preserves input order in the returned Vec** — the
+    /// usual gotcha is `futures::buffer_unordered` which yields in
+    /// completion order; this method uses `buffered()` so callers
+    /// can safely zip the output against the input slice by index.
+    ///
+    /// Failure handling: each input gets its own `Result`. A failure
+    /// on one paragraph doesn't abort the rest.
+    pub async fn translate_batch_bounded(
+        &self,
+        texts: &[String],
+        src_lang: &str,
+        tgt_lang: &str,
+        concurrency: usize,
+    ) -> Vec<Result<String, Error>> {
+        use futures::stream::{self, StreamExt};
+        let conc = concurrency.max(1);
+        stream::iter(texts.iter())
+            .map(|t| async move { self.translate_text(t, src_lang, tgt_lang).await })
+            .buffered(conc)
+            .collect()
+            .await
     }
 
     /// Borrow the configured providers (for diagnostics, e.g. listing

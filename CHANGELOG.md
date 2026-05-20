@@ -5,8 +5,20 @@ versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-Nothing pending in `main` that isn't already in `0.1.0`. The next bump
-will likely be `0.1.1` (small) or `0.2.0` (new crate / breaking API).
+Changes since v0.1.0 release tag — will roll into `0.1.1` or `0.2.0`
+depending on whether the Provider trait change counts as breaking
+for any downstream.
+
+### Added
+- `LlmTranslator::translate_batch_bounded(texts, src, tgt, concurrency)` — order-preserving bounded fan-out. Use this over `translate_batch` when you care about input/output index alignment (every caller does, in practice).
+- `Language` struct with `name` + `code` fields. Parses from either a human-readable name (`"German"`) or an ISO-639-1 code (`"de"`); unknown inputs pass through. LLM-backed providers consume `.name` in prompts; NMT backends consume `.code` against the model. Replaces the free-form `&str` lang args at the `Provider::translate` trait boundary.
+- `crisp-translate-cli`: split `--features align` into independent `align` (CrispEmbed encoder) + `nmt` (CrispASR offline NMT) + `full` (both). Users can build only what they need.
+
+### Fixed
+- **crisp-translate-cli concurrency bug**: `buffer_unordered` scrambled paragraph order in the output docx. Switched to `buffered(N)` which preserves input order at the same throughput. Surfaced by inspecting v0.2 output vs v0.1 — paragraph #2 in v0.1 was the source's paragraph #4, etc.
+
+### Verified live (May 2026)
+- v0.2 format-preserving translation of Vielfalt cs15.docx via Nebius + paraphrase-multilingual-MiniLM-L12-v2 on the alignment side: 61/61 paragraphs translated in order, italic spans preserved (e.g. paragraph #13's Latin/Greek terms `vera philosophia`, `paidagôgos`).
 
 ## [0.1.0] — 2026-05-20
 

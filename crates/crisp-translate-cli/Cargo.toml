@@ -1,6 +1,6 @@
 [package]
 name        = "crisp-translate-cli"
-description = "`crisp-translate` — end-to-end .docx translation CLI. Picks paragraphs, hits an LLM provider (cloud or local), writes back preserving paragraph styles, sections, bookmarks, and footnote refs. Optional alignment-driven intra-paragraph format preservation under --features align."
+description = "`crisp-translate` — end-to-end .docx translation CLI. Picks paragraphs, hits an LLM provider (cloud or local), writes back preserving paragraph styles, sections, bookmarks, and footnote refs. Optional alignment-driven intra-paragraph format preservation under --features align; optional offline NMT (m2m100 / wmt21) under --features nmt; --features full bundles both."
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true
@@ -23,14 +23,27 @@ path = "src/main.rs"
 
 [features]
 default = []
+
 # Opt-in: pulls in `crisp-docx-align` with its CrispEmbed encoder. Adds
-# minutes to the first build because the ggml C++ runtime is compiled
-# in. Required for `--preserve-formatting`.
+# minutes to the first build because the C++ ggml runtime is compiled in.
+# Required for `--preserve-formatting`.
 align = ["dep:crisp-docx-align", "dep:crispembed"]
+
+# Opt-in: pulls in CrispASR as an offline NMT backend (m2m100 / wmt21 /
+# madlad / gemma4-e2b). Independent from `align` — you can have one,
+# the other, or both. Required to actually USE `--provider nmt`; the
+# CLI compiles either way, the Nmt provider just errors at construction
+# time without this feature.
+nmt = ["crisp-docx-llm/nmt"]
+
+# Convenience: turn on both heavy features at once.
+full = ["align", "nmt"]
 
 [dependencies]
 crisp-docx-core  = { workspace = true }
-crisp-docx-llm   = { path = "../crisp-docx-llm", version = "0.1.0" }
+# default-features = false lets `--features nmt` propagate without
+# pulling in any other crisp-docx-llm feature.
+crisp-docx-llm   = { path = "../crisp-docx-llm", version = "0.1.0", default-features = false }
 crisp-docx-align = { path = "../crisp-docx-align", version = "0.1.0", features = ["crispembed"], optional = true }
 crispembed       = { path = "../../../CrispEmbed/crispembed", version = "0.4", optional = true }
 

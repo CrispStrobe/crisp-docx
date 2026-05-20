@@ -113,12 +113,14 @@ Provider auto-pick scans `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
 ### Document translation (offline NMT, no network)
 
 ```bash
-# Requires checkouts of sibling repos:
-#   ../CrispEmbed/   (only if --features align)
-#   ../CrispASR/     (only if --features nmt — for offline translation)
+# Sibling repos required for the heavy features:
+#   ../CrispEmbed/   when building --features align (or full)
+#   ../CrispASR/     when building --features nmt   (or full)
 git clone https://github.com/CrispStrobe/crisp-docx
 cd crisp-docx
-cargo build --release -p crisp-translate-cli --features align
+# `--features nmt` enables `--provider nmt` (offline NMT via CrispASR).
+# Doesn't pull in CrispEmbed, so the build is faster than `--features align`.
+cargo build --release -p crisp-translate-cli --features nmt
 ./target/release/crisp-translate input.docx -o out.docx \
     --target-lang German \
     --provider nmt \
@@ -128,10 +130,20 @@ cargo build --release -p crisp-translate-cli --features align
 ### Format-preserving translation (v0.2)
 
 ```bash
+# Cloud LLM (Groq) + format-preservation alignment encoder
 cargo build --release -p crisp-translate-cli --features align
 ./target/release/crisp-translate input.docx -o out.docx \
     --target-lang German \
     --provider groq \
+    --preserve-formatting \
+    --align-model /path/to/paraphrase-multilingual-MiniLM-L12-v2.gguf
+
+# Or, fully offline: NMT + alignment together
+cargo build --release -p crisp-translate-cli --features full
+./target/release/crisp-translate input.docx -o out.docx \
+    --target-lang German \
+    --provider nmt \
+    --model /path/to/m2m100-418m-q8_0.gguf \
     --preserve-formatting \
     --align-model /path/to/paraphrase-multilingual-MiniLM-L12-v2.gguf
 ```
@@ -166,14 +178,10 @@ print(f"{len(runs)} paragraphs, first runs: {[r.text for r in runs[0].runs[:3]]}
 # Default — fast, no C++ deps, OOXML-only
 cargo build --workspace
 
-# With offline NMT (compiles CrispASR ggml runtime — minutes)
-cargo build --workspace --features nmt
-
-# With transformer alignment (compiles CrispEmbed ggml runtime — minutes)
-cargo build --workspace --features align
-
-# Both — fully offline translation + format preservation
-cargo build --workspace --features align,nmt
+# `crisp-translate-cli` only; features are independent:
+cargo build -p crisp-translate-cli --features nmt    # CrispASR (offline NMT)
+cargo build -p crisp-translate-cli --features align  # CrispEmbed (word alignment for format-preservation)
+cargo build -p crisp-translate-cli --features full   # both
 ```
 
 CrispEmbed and CrispASR are sibling-repo path deps; clone them next to this repo if you build with their respective features. See `.github/workflows/ci.yml` for the CI checkout pattern.

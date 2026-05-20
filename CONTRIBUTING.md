@@ -91,6 +91,8 @@ CI does the same thing in `.github/workflows/ci.yml` via parallel
 | `crisp-docx-align` | `crispembed` | CrispEmbed Rust crate (compiles C++ ggml) | Anything that needs SimAlign alignment |
 | `crisp-docx-llm` | `nmt` | CrispASR Rust crate | The `Nmt` provider variant (offline m2m100 / wmt21 / madlad) |
 | `crisp-translate-cli` | `align` | crisp-docx-align with `crispembed` | The `--preserve-formatting` CLI flag |
+| `crisp-translate-cli` | `nmt`   | crisp-docx-llm with `nmt` | Use `--provider nmt --model …gguf` for offline translation |
+| `crisp-translate-cli` | `full`  | both `align` + `nmt`     | Format-preserving offline translation |
 
 `cargo build --workspace` (default features) skips all C++ compilation
 and finishes in seconds. The feature flags above add minutes to the
