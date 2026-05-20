@@ -35,8 +35,15 @@ thiserror  = { workspace = true }
 # harness: a developer-local dependency, not an over-the-net crate.
 crispembed = { path = "../../../CrispEmbed/crispembed", version = "0.4", optional = true }
 
-[dev-dependencies]
-crispembed = { path = "../../../CrispEmbed/crispembed", version = "0.4" }
+# No [dev-dependencies] section: the only target that needs crispembed is
+# the `align_smoke` example, which gates itself via `required-features`
+# below. Adding crispembed as a non-optional dev-dep would force
+# `cargo test`/`cargo clippy --all-targets` (default features) to drag
+# in `crispembed-sys`'s cmake step — which in turn needs CrispEmbed's
+# ggml git submodule, breaking sibling-checkout CI runs that don't pass
+# `submodules: recursive`. All in-crate `use crispembed::...` lives
+# inside `#[cfg(feature = "crispembed")]` modules, so the optional
+# dep above is sufficient.
 
 [[example]]
 name              = "align_smoke"
