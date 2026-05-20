@@ -18,7 +18,8 @@ for any downstream.
 - **crisp-translate-cli concurrency bug**: `buffer_unordered` scrambled paragraph order in the output docx. Switched to `buffered(N)` which preserves input order at the same throughput. Surfaced by inspecting v0.2 output vs v0.1 — paragraph #2 in v0.1 was the source's paragraph #4, etc.
 
 ### Verified live (May 2026)
-- v0.2 format-preserving translation of Vielfalt cs15.docx via Nebius + paraphrase-multilingual-MiniLM-L12-v2 on the alignment side: 61/61 paragraphs translated in order, italic spans preserved (e.g. paragraph #13's Latin/Greek terms `vera philosophia`, `paidagôgos`).
+- **Format-preserving cloud translation**: Vielfalt cs15.docx via Nebius + paraphrase-multilingual-MiniLM-L12-v2 on the alignment side. 61/61 paragraphs translated in order, italic spans preserved (e.g. paragraph #13's Latin/Greek terms `vera philosophia`, `paidagôgos`).
+- **Fully-offline NMT translation**: same docx through `--provider nmt --model m2m100-418m-q8_0.gguf` — 61/61 paragraphs, ~5 min on M1 single-thread, zero network. Output 26 KB; paragraph order verified preserved (src #0 "Pre-modern sources…" → out #0 "Vormoderne Quellen…"). Translation quality varies (418M model is smaller than cloud LLMs) but the pipeline is functional end-to-end.
 
 ## [0.1.0] — 2026-05-20
 
