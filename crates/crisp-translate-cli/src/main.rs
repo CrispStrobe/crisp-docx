@@ -97,6 +97,11 @@ enum ProviderKindArg {
     Scaleway,
     Poe,
     Google,
+    /// Offline NMT via CrispASR (m2m100 / wmt21 / madlad / gemma4-e2b).
+    /// `--model <path-to.gguf>` is required; `--align-model` and `--api-key`
+    /// are unused. The crate must be built with `--features nmt` for this
+    /// to work at runtime; otherwise the runtime returns a config error.
+    Nmt,
 }
 
 impl From<ProviderKindArg> for ProviderKind {
@@ -114,6 +119,7 @@ impl From<ProviderKindArg> for ProviderKind {
             ProviderKindArg::Scaleway => ProviderKind::Scaleway,
             ProviderKindArg::Poe => ProviderKind::Poe,
             ProviderKindArg::Google => ProviderKind::Google,
+            ProviderKindArg::Nmt => ProviderKind::Nmt,
         }
     }
 }
@@ -429,6 +435,10 @@ fn build_provider_config(kind: ProviderKindArg, model: Option<String>) -> Result
         ProviderKindArg::Scaleway => (Some("SCALEWAY_API_KEY"), "llama-3.3-70b-instruct"),
         ProviderKindArg::Poe => (Some("POE_API_KEY"), "GPT-4o-mini"),
         ProviderKindArg::Google => (Some("GOOGLEAI_API_KEY"), "gemini-2.0-flash"),
+        // NMT loads a GGUF file from disk — no env-driven API key,
+        // and the `model` arg carries the path verbatim. The caller
+        // MUST pass `--model /path/to/m2m100-…gguf` for this to work.
+        ProviderKindArg::Nmt => (None, ""),
     };
     let api_key = match api_key_env {
         Some(var) => Some(std::env::var(var).map_err(|_| {
@@ -468,6 +478,7 @@ impl ProviderKindName for ProviderKind {
             ProviderKind::Scaleway => "scaleway",
             ProviderKind::Poe => "poe",
             ProviderKind::Google => "google",
+            ProviderKind::Nmt => "nmt",
         }
     }
 }

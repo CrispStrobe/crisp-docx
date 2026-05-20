@@ -5,7 +5,7 @@
 //! provider, the next is tried. If they all fail, the last error is
 //! bubbled up via [`Error::AllProvidersFailed`].
 
-use crate::providers::{Provider, ProviderConfig, TranslateOptions};
+use crate::providers::{Language, Provider, ProviderConfig, TranslateOptions};
 use crate::Error;
 
 /// Translation runner. Construct with [`LlmTranslator::new`] then add
@@ -84,9 +84,14 @@ impl LlmTranslator {
         } else {
             crate::providers::PromptStyle::Fluent
         };
+        // Free-form strings (`"English"` / `"de"`) → typed Language
+        // (carries both `.name` and `.code`) so each Provider impl
+        // picks the right representation.
+        let src = Language::parse(src_lang);
+        let tgt = Language::parse(tgt_lang);
         let mut last_err: Option<Error> = None;
         for p in &self.providers {
-            match p.translate(text, src_lang, tgt_lang, &opts).await {
+            match p.translate(text, &src, &tgt, &opts).await {
                 Ok(out) => return Ok(out),
                 Err(e) => {
                     tracing::debug!(provider = p.name(), error = %e, "translate failed");
@@ -137,7 +142,9 @@ mod tests {
 
     #[test]
     fn prompt_uses_alignment_clause_when_requested() {
-        let p = build_translation_prompt("Hello.", "English", "German", PromptStyle::PreserveOrder);
+        let en = Language::parse("English");
+        let de = Language::parse("German");
+        let p = build_translation_prompt("Hello.", &en, &de, PromptStyle::PreserveOrder);
         assert!(p.contains("Hello."));
         assert!(p.contains("from English to German"));
         assert!(p.contains("Preserve the word order"));
@@ -146,9 +153,39 @@ mod tests {
 
     #[test]
     fn prompt_uses_fluency_clause_otherwise() {
-        let p = build_translation_prompt("Hello.", "English", "German", PromptStyle::Fluent);
+        let en = Language::parse("English");
+        let de = Language::parse("German");
+        let p = build_translation_prompt("Hello.", &en, &de, PromptStyle::Fluent);
         assert!(p.contains("natural, fluent"));
         assert!(!p.contains("Preserve the word order"));
+    }
+
+    #[test]
+    fn language_parses_iso_code() {
+        let l = Language::parse("de");
+        assert_eq!(l.code, "de");
+        assert_eq!(l.name, "German");
+    }
+
+    #[test]
+    fn language_parses_human_name() {
+        let l = Language::parse("German");
+        assert_eq!(l.name, "German");
+        assert_eq!(l.code, "de");
+    }
+
+    #[test]
+    fn language_passes_unknown_through() {
+        let l = Language::parse("Klingon");
+        assert_eq!(l.name, "Klingon");
+        assert_eq!(l.code, "Klingon");
+    }
+
+    #[test]
+    fn language_handles_native_names() {
+        assert_eq!(Language::parse("Deutsch").code, "de");
+        assert_eq!(Language::parse("français").code, "fr");
+        assert_eq!(Language::parse("中文").code, "zh");
     }
 
     #[tokio::test]

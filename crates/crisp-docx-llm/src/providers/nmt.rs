@@ -25,7 +25,7 @@
 
 use async_trait::async_trait;
 
-use super::{ModelInfo, Provider, ProviderConfig, TranslateOptions};
+use super::{Language, ModelInfo, Provider, ProviderConfig, TranslateOptions};
 use crate::Error;
 
 pub(crate) struct NmtProvider {
@@ -114,12 +114,12 @@ impl Provider for NmtProvider {
     async fn translate(
         &self,
         text: &str,
-        src_lang: &str,
-        tgt_lang: &str,
+        src: &Language,
+        tgt: &Language,
         opts: &TranslateOptions,
     ) -> Result<String, Error> {
-        let src = map_lang_to_code(src_lang);
-        let tgt = map_lang_to_code(tgt_lang);
+        let src_code = &src.code;
+        let tgt_code = &tgt.code;
         // GGML inference is synchronous + CPU-bound. Block the current
         // async task — NMT calls on m2m100 are sub-second per paragraph;
         // batching is handled at the caller (LlmTranslator::translate_batch)
@@ -132,7 +132,7 @@ impl Provider for NmtProvider {
             .lock()
             .map_err(|e| Error::Config(format!("nmt session mutex poisoned: {e}")))?;
         let out = guard
-            .translate_text(text, &src, &tgt, opts.max_tokens as i32)
+            .translate_text(text, src_code, tgt_code, opts.max_tokens as i32)
             .map_err(|e| Error::BadResponse {
                 provider: "nmt",
                 reason: format!("translate_text failed: {e}"),

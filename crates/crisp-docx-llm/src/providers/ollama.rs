@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{build_translation_prompt, ModelInfo, Provider, ProviderConfig, TranslateOptions};
+use super::{
+    build_translation_prompt, Language, ModelInfo, Provider, ProviderConfig, TranslateOptions,
+};
 use crate::Error;
 
 const DEFAULT_BASE: &str = "http://localhost:11434/api";
@@ -57,11 +59,11 @@ impl Provider for OllamaProvider {
     async fn translate(
         &self,
         text: &str,
-        src_lang: &str,
-        tgt_lang: &str,
+        src: &Language,
+        tgt: &Language,
         opts: &TranslateOptions,
     ) -> Result<String, Error> {
-        let prompt = build_translation_prompt(text, src_lang, tgt_lang, opts.prompt_style);
+        let prompt = build_translation_prompt(text, src, tgt, opts.prompt_style);
         let url = format!("{}/generate", self.base_url);
         let body = GenerateRequest {
             model: &self.model,

@@ -12,7 +12,7 @@ use crate::Error;
 
 mod anthropic;
 #[cfg(feature = "nmt")]
-mod nmt;
+pub mod nmt;
 mod ollama;
 mod openai;
 
@@ -158,29 +158,182 @@ pub struct ModelInfo {
     pub capabilities: String,
 }
 
+/// A language with both a human-readable display name and an
+/// ISO-639-1 code. LLM-backed providers use [`Self::name`] in their
+/// natural-language prompt; NMT backends use [`Self::code`] verbatim.
+///
+/// Construct from either form:
+///
+/// ```
+/// use crisp_docx_llm::Language;
+/// assert_eq!(Language::from("English").code, "en");
+/// assert_eq!(Language::from("de").name, "German");
+/// assert_eq!(Language::from("Klingon").name, "Klingon"); // pass-through
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Language {
+    /// Human-readable name (e.g. `"German"`). Used by LLM prompts.
+    pub name: String,
+    /// ISO-639-1 code (e.g. `"de"`). Used by NMT models.
+    pub code: String,
+}
+
+impl Language {
+    /// Build a [`Language`] from a free-form string. Recognises both
+    /// known display names (`"English"`, `"German"`, `"français"`, …)
+    /// and ISO codes (`"en"`, `"de"`, `"fr"`). Unknown inputs pass
+    /// through verbatim — the same string is reused for both `name`
+    /// and `code` so NMT backends still get a chance, even if the
+    /// model rejects unknown codes.
+    pub fn parse(s: &str) -> Self {
+        let trimmed = s.trim();
+        if trimmed.is_empty() {
+            return Self {
+                name: String::new(),
+                code: String::new(),
+            };
+        }
+        // Short all-ASCII alphabetic? Treat as a code; look up name.
+        let looks_like_code =
+            trimmed.len() <= 3 && trimmed.chars().all(|c| c.is_ascii_alphabetic());
+        if looks_like_code {
+            let code = trimmed.to_ascii_lowercase();
+            let name = name_for_code(&code).unwrap_or(trimmed);
+            return Self {
+                name: name.to_string(),
+                code,
+            };
+        }
+        // Longer / non-ASCII → treat as a name; look up code.
+        match code_for_name(trimmed) {
+            Some(code) => Self {
+                name: trimmed.to_string(),
+                code: code.to_string(),
+            },
+            None => Self {
+                name: trimmed.to_string(),
+                code: trimmed.to_string(),
+            },
+        }
+    }
+}
+
+impl From<&str> for Language {
+    fn from(s: &str) -> Self {
+        Self::parse(s)
+    }
+}
+
+impl From<String> for Language {
+    fn from(s: String) -> Self {
+        Self::parse(&s)
+    }
+}
+
+/// Map an ISO code to its English display name (best-effort).
+fn name_for_code(code: &str) -> Option<&'static str> {
+    match code {
+        "en" => Some("English"),
+        "de" => Some("German"),
+        "fr" => Some("French"),
+        "es" => Some("Spanish"),
+        "it" => Some("Italian"),
+        "pt" => Some("Portuguese"),
+        "nl" => Some("Dutch"),
+        "pl" => Some("Polish"),
+        "ru" => Some("Russian"),
+        "uk" => Some("Ukrainian"),
+        "cs" => Some("Czech"),
+        "sv" => Some("Swedish"),
+        "no" => Some("Norwegian"),
+        "da" => Some("Danish"),
+        "fi" => Some("Finnish"),
+        "el" => Some("Greek"),
+        "tr" => Some("Turkish"),
+        "ar" => Some("Arabic"),
+        "he" => Some("Hebrew"),
+        "zh" => Some("Chinese"),
+        "ja" => Some("Japanese"),
+        "ko" => Some("Korean"),
+        "hi" => Some("Hindi"),
+        "vi" => Some("Vietnamese"),
+        "th" => Some("Thai"),
+        "id" => Some("Indonesian"),
+        "ro" => Some("Romanian"),
+        "hu" => Some("Hungarian"),
+        "bg" => Some("Bulgarian"),
+        "sr" => Some("Serbian"),
+        "hr" => Some("Croatian"),
+        "sl" => Some("Slovenian"),
+        "sk" => Some("Slovak"),
+        _ => None,
+    }
+}
+
+/// Map a display name (case-insensitive) to its ISO code.
+fn code_for_name(name: &str) -> Option<&'static str> {
+    let lower = name.to_ascii_lowercase();
+    Some(match lower.as_str() {
+        "english" => "en",
+        "german" | "deutsch" => "de",
+        "french" | "français" | "francais" => "fr",
+        "spanish" | "español" | "espanol" | "castellano" => "es",
+        "italian" | "italiano" => "it",
+        "portuguese" | "português" | "portugues" => "pt",
+        "dutch" | "nederlands" => "nl",
+        "polish" | "polski" => "pl",
+        "russian" | "русский" | "russky" | "russkiy" => "ru",
+        "ukrainian" | "українська" | "ukrayinska" => "uk",
+        "czech" | "čeština" | "cestina" => "cs",
+        "swedish" | "svenska" => "sv",
+        "norwegian" | "norsk" => "no",
+        "danish" | "dansk" => "da",
+        "finnish" | "suomi" => "fi",
+        "greek" | "ελληνικά" => "el",
+        "turkish" | "türkçe" | "turkce" => "tr",
+        "arabic" | "العربية" => "ar",
+        "hebrew" | "עברית" => "he",
+        "chinese" | "中文" | "mandarin" => "zh",
+        "japanese" | "日本語" => "ja",
+        "korean" | "한국어" => "ko",
+        "hindi" | "हिन्दी" => "hi",
+        "vietnamese" | "tiếng việt" | "tieng viet" => "vi",
+        "thai" | "ไทย" => "th",
+        "indonesian" | "bahasa indonesia" => "id",
+        "romanian" | "română" | "romana" => "ro",
+        "hungarian" | "magyar" => "hu",
+        "bulgarian" | "български" => "bg",
+        "serbian" | "српски" | "srpski" => "sr",
+        "croatian" | "hrvatski" => "hr",
+        "slovenian" | "slovenščina" | "slovenski" => "sl",
+        "slovak" | "slovenský" | "slovensky" => "sk",
+        _ => return None,
+    })
+}
+
 /// The abstraction every provider impl exposes.
 ///
-/// `translate(text, src_lang, tgt_lang, opts)` takes the raw source
-/// text plus a language pair. Each provider decides how to phrase the
-/// task: LLM-backed providers (OpenAI / Anthropic / Ollama / Groq /
+/// `translate(text, src, tgt, opts)` takes the raw source text plus a
+/// language pair. Each provider decides how to phrase the task:
+/// LLM-backed providers (OpenAI / Anthropic / Ollama / Groq /
 /// OpenRouter / Together / Cerebras / Mistral / Nebius / Scaleway /
 /// Poe / Google) build a chat-completion prompt internally; NMT
 /// backends like CrispASR's m2m100 / wmt21 (under the `nmt` feature)
-/// pass `(text, src_lang, tgt_lang)` straight to the model.
+/// pass `(text, src.code, tgt.code)` straight to the model.
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// Provider tag for logs and errors. Stable static string.
     fn name(&self) -> &'static str;
 
-    /// Translate `text` from `src_lang` to `tgt_lang`. The language
-    /// strings are free-form on the caller side (e.g. `"English"`,
-    /// `"German"`); NMT backends with a fixed code vocabulary do their
-    /// own name→code lookup internally.
+    /// Translate `text` from `src` to `tgt`. The [`Language`] type
+    /// carries both a display name (for LLM prompts) and an ISO code
+    /// (for NMT backends) so each provider can pick the right
+    /// representation without doing its own lookup.
     async fn translate(
         &self,
         text: &str,
-        src_lang: &str,
-        tgt_lang: &str,
+        src: &Language,
+        tgt: &Language,
         opts: &TranslateOptions,
     ) -> Result<String, Error>;
 
@@ -195,8 +348,8 @@ pub trait Provider: Send + Sync {
 /// callers can override it via [`TranslateOptions::prompt_style`].
 pub fn build_translation_prompt(
     text: &str,
-    src_lang: &str,
-    tgt_lang: &str,
+    src: &Language,
+    tgt: &Language,
     style: PromptStyle,
 ) -> String {
     let clause = match style {
@@ -205,8 +358,10 @@ pub fn build_translation_prompt(
         }
         PromptStyle::Fluent => "Provide a natural, fluent translation.",
     };
+    let src_name = &src.name;
+    let tgt_name = &tgt.name;
     format!(
-        "Translate the following text from {src_lang} to {tgt_lang}. {clause} \
+        "Translate the following text from {src_name} to {tgt_name}. {clause} \
          Return ONLY the translation:\n\n{text}"
     )
 }

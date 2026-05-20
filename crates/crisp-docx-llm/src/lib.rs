@@ -36,5 +36,7 @@ mod providers;
 mod translator;
 
 pub use error::Error;
-pub use providers::{ModelInfo, Provider, ProviderConfig, ProviderKind, TranslateOptions};
+pub use providers::{
+    Language, ModelInfo, PromptStyle, Provider, ProviderConfig, ProviderKind, TranslateOptions,
+};
 pub use translator::LlmTranslator;
