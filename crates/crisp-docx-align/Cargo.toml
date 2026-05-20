@@ -1,10 +1,19 @@
 [package]
 name        = "crisp-docx-align"
-version     = "0.1.0"
-edition     = "2021"
-description = "Offline word/token aligner — SimAlign-style argmax+intersection over CrispEmbed contextual token embeddings."
-license     = { workspace = true }
-repository  = { workspace = true }
+description = "Offline word/token aligner — SimAlign-style argmax / intersection / itermax over CrispEmbed contextual token embeddings. Generic over the format-id, so callers carry OOXML rPr bytes through translation."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+authors.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+readme.workspace       = true
+keywords    = ["nlp", "alignment", "simalign", "translation", "embeddings"]
+categories  = ["text-processing", "science"]
+# Not published to crates.io: depends on the sibling CrispEmbed repo,
+# which isn't (yet) on crates.io. Use a git dep on CrispStrobe/crisp-docx.
+publish     = false
 
 [lib]
 name = "crisp_docx_align"

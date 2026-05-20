@@ -1,10 +1,21 @@
 [package]
 name        = "crisp-translate-cli"
-version     = "0.1.0"
-edition     = "2021"
-description = "End-to-end CLI: translate a .docx with format preserved, via crisp-docx + crisp-docx-llm."
-license     = { workspace = true }
-repository  = { workspace = true }
+description = "`crisp-translate` — end-to-end .docx translation CLI. Picks paragraphs, hits an LLM provider (cloud or local), writes back preserving paragraph styles, sections, bookmarks, and footnote refs. Optional alignment-driven intra-paragraph format preservation under --features align."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+authors.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+readme.workspace       = true
+keywords    = ["docx", "translation", "cli", "llm", "ooxml"]
+categories  = ["command-line-utilities", "text-processing"]
+# Not published to crates.io: transitively depends on crisp-docx-llm
+# (sibling CrispASR path dep) and optionally crisp-docx-align (sibling
+# CrispEmbed). Use a git dep / `cargo install --git` until those upstream
+# crates land on the registry.
+publish     = false
 
 [[bin]]
 name = "crisp-translate"

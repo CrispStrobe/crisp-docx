@@ -1,10 +1,20 @@
 [package]
 name        = "crisp-docx-llm"
-version     = "0.1.0"
-edition     = "2021"
-description = "Async LLM HTTP clients (OpenAI / Anthropic / Ollama / Groq) for use in the crisp-docx translator pipeline. Rust port of CrispTranslator's LLMTranslator."
-license     = { workspace = true }
-repository  = { workspace = true }
+description = "Async LLM HTTP clients (OpenAI / Anthropic / Ollama / Groq + 8 OpenAI-compat hosts) plus optional offline NMT via CrispASR — the translation backend for the crisp-docx pipeline."
+version.workspace      = true
+edition.workspace      = true
+rust-version.workspace = true
+authors.workspace      = true
+license.workspace      = true
+repository.workspace   = true
+homepage.workspace     = true
+readme.workspace       = true
+keywords    = ["llm", "openai", "anthropic", "translation", "ollama"]
+categories  = ["api-bindings", "asynchronous", "text-processing"]
+# Not published to crates.io: the optional `nmt` feature path-deps the
+# sibling CrispASR repo, which isn't (yet) on crates.io. Consumers
+# wanting this crate use a git dep on CrispStrobe/crisp-docx instead.
+publish     = false
 
 [features]
 default = []

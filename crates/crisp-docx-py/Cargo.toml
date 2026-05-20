@@ -8,6 +8,10 @@ authors.workspace      = true
 license.workspace      = true
 repository.workspace   = true
 homepage.workspace     = true
+# Not published to crates.io — this is a `cdylib` for Python use only,
+# distributed via PyPI as the `crisp_docx` wheel built by maturin.
+# `cargo install crisp-docx-py` doesn't make sense.
+publish     = false
 
 [lib]
 name       = "crisp_docx"
