@@ -1,15 +1,20 @@
 name: ci
 
-# crisp-docx workspace members `crisp-docx-align` and `crisp-translate-cli`
-# carry a path dep on `../../CrispEmbed/crispembed` (optional + dev-deps).
-# Cargo metadata resolves the manifest even when the optional feature
-# is OFF, so CI must have the CrispEmbed repo present at the expected
-# sibling location or every cargo command fails before it starts.
+# crisp-docx workspace members `crisp-docx-align`, `crisp-docx-llm`,
+# and `crisp-translate-cli` carry path deps on:
 #
-# What actually compiles: only crisp-docx-* crates. CrispEmbed's C++
-# (ggml) runtime is NOT built unless a `--features crispembed` or
-# `--features align` is passed, which we don't do in any of the
-# default jobs.
+#   crisp-docx-align     → ../../CrispEmbed/crispembed   (optional + dev-deps)
+#   crisp-docx-llm       → ../../../CrispASR/crispasr     (optional, behind `nmt`)
+#   crisp-translate-cli  → both of the above              (optional, behind `align`)
+#
+# Cargo metadata resolves manifests even when the optional features
+# are OFF, so CI must have both sibling repos present or every cargo
+# command fails before it starts.
+#
+# What actually compiles: only crisp-docx-* crates. CrispEmbed's and
+# CrispASR's C++ (ggml) runtimes are NOT built unless a `--features
+# crispembed`, `--features align`, or `--features nmt` is passed,
+# which we don't do in any of the default jobs.
 
 on:
   push:
@@ -34,6 +39,11 @@ jobs:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
           submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispASR
+          path: CrispASR
+          submodules: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -50,6 +60,11 @@ jobs:
         with:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispASR
+          path: CrispASR
           submodules: false
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -81,6 +96,11 @@ jobs:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
           submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispASR
+          path: CrispASR
+          submodules: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Rust core + CLI tests
         working-directory: crisp-docx
@@ -101,6 +121,11 @@ jobs:
         with:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispASR
+          path: CrispASR
           submodules: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
