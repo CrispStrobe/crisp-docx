@@ -10,9 +10,18 @@ repository  = { workspace = true }
 name = "crisp-translate"
 path = "src/main.rs"
 
+[features]
+default = []
+# Opt-in: pulls in `crisp-docx-align` with its CrispEmbed encoder. Adds
+# minutes to the first build because the ggml C++ runtime is compiled
+# in. Required for `--preserve-formatting`.
+align = ["dep:crisp-docx-align", "dep:crispembed"]
+
 [dependencies]
-crisp-docx-core = { workspace = true }
-crisp-docx-llm  = { path = "../crisp-docx-llm", version = "0.1.0" }
+crisp-docx-core  = { workspace = true }
+crisp-docx-llm   = { path = "../crisp-docx-llm", version = "0.1.0" }
+crisp-docx-align = { path = "../crisp-docx-align", version = "0.1.0", features = ["crispembed"], optional = true }
+crispembed       = { path = "../../../CrispEmbed/crispembed", version = "0.4", optional = true }
 
 anyhow      = { workspace = true }
 clap        = { workspace = true }

@@ -277,8 +277,10 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "crisp-docx-align",
  "crisp-docx-core",
  "crisp-docx-llm",
+ "crispembed",
  "futures",
  "serde_json",
  "tokio",

@@ -66,6 +66,21 @@ struct Cli {
     /// texts to stdout and exit. Useful for dry-running large docs.
     #[arg(long)]
     dry_run: bool,
+
+    /// Preserve intra-paragraph run formatting (bold / italic / rStyle)
+    /// across the translation by aligning source ↔ target words via a
+    /// multilingual encoder. Requires building with `--features align`
+    /// and pointing `--align-model` at a multilingual encoder GGUF.
+    #[cfg(feature = "align")]
+    #[arg(long)]
+    preserve_formatting: bool,
+
+    /// Path to a multilingual encoder GGUF (e.g.
+    /// paraphrase-multilingual-MiniLM-L12-v2.gguf). Used only when
+    /// `--preserve-formatting` is set.
+    #[cfg(feature = "align")]
+    #[arg(long)]
+    align_model: Option<PathBuf>,
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -158,6 +173,34 @@ async fn main() -> Result<()> {
     );
 
     // ── Step 4: write back ────────────────────────────────────────────
+    //
+    // Two paths:
+    //
+    //   - v0.2 path (`--preserve-formatting`): switch to run-level
+    //     extract+replace and use the alignment-driven format-transfer
+    //     to redistribute the original runs' rPr onto the translated
+    //     text. Preserves bold / italic / rStyle spans across the
+    //     translation.
+    //
+    //   - v0.1 path (default): paragraph-level text-only round-trip —
+    //     loses intra-paragraph formatting (collapsed to one run) but
+    //     keeps pStyle, sections, bookmarks, footnote refs.
+
+    #[cfg(feature = "align")]
+    if cli.preserve_formatting {
+        write_back_preserving_formatting(
+            &mut pkg,
+            &cli,
+            &paragraphs,
+            &translations,
+        )
+        .context("write-back with format preservation")?;
+        crisp_docx_core::save(&pkg, &cli.output)
+            .with_context(|| format!("saving to {}", cli.output.display()))?;
+        eprintln!("wrote {}", cli.output.display());
+        return Ok(());
+    }
+
     let mut new_texts: Vec<String> = Vec::with_capacity(translations.len());
     for (orig, t) in paragraphs.iter().zip(translations.iter()) {
         match t {
@@ -171,6 +214,123 @@ async fn main() -> Result<()> {
         .with_context(|| format!("saving to {}", cli.output.display()))?;
     eprintln!("wrote {}", cli.output.display());
 
+    Ok(())
+}
+
+#[cfg(feature = "align")]
+fn write_back_preserving_formatting(
+    pkg: &mut crisp_docx_core::Package,
+    cli: &Cli,
+    src_texts: &[String],
+    translations: &[Result<String, crisp_docx_llm::Error>],
+) -> Result<()> {
+    use crisp_docx_align::{transfer_format_via_words, SourceRun, Strategy};
+    use crisp_docx_align::align_texts;
+    use crisp_docx_core::{ParagraphInfo, Run as CoreRun};
+    use crispembed::CrispEmbed;
+
+    let model_path = cli
+        .align_model
+        .as_deref()
+        .context("--preserve-formatting requires --align-model <path-to-gguf>")?;
+    let mut model = CrispEmbed::new(
+        model_path.to_str().context("non-UTF-8 align-model path")?,
+        4,
+    )
+    .map_err(anyhow::Error::msg)
+    .with_context(|| format!("loading align model {}", model_path.display()))?;
+
+    // Re-extract the runs so we have the source rPr per run.
+    let src_paragraphs = crisp_docx_core::extract_paragraph_runs(pkg)
+        .context("extracting paragraph runs from word/document.xml")?;
+    if src_paragraphs.len() != src_texts.len() {
+        anyhow::bail!(
+            "paragraph-count mismatch: text-extract found {} but run-extract found {}",
+            src_texts.len(),
+            src_paragraphs.len()
+        );
+    }
+
+    let mut new_paragraphs: Vec<ParagraphInfo> = Vec::with_capacity(src_paragraphs.len());
+    for (i, info) in src_paragraphs.iter().enumerate() {
+        let translation = match translations.get(i) {
+            Some(Ok(t)) => t.as_str(),
+            _ => {
+                // Translation failed — keep the paragraph as-is.
+                new_paragraphs.push(info.clone());
+                continue;
+            }
+        };
+        let src_text = info.full_text();
+        if src_text.trim().is_empty() {
+            new_paragraphs.push(info.clone());
+            continue;
+        }
+
+        // Build SourceRun<Option<Vec<u8>>> from the OOXML runs. We treat
+        // each run's `rpr_xml` as the opaque format identifier.
+        let source_runs: Vec<SourceRun<Option<Vec<u8>>>> = info
+            .runs
+            .iter()
+            .map(|r| SourceRun {
+                text: r.text.clone(),
+                format_id: r.rpr_xml.clone(),
+            })
+            .collect();
+
+        let alignment = align_texts(&mut model, &src_text, translation, Strategy::Itermax {
+            min_sim: 0.3,
+        })
+        .with_context(|| format!("aligning paragraph {i}"))?;
+        let target_runs = transfer_format_via_words(
+            &source_runs,
+            translation,
+            &alignment.word_edges,
+            None,
+        );
+
+        // Convert TargetRun<Option<Vec<u8>>> into core Run + carry
+        // footnote refs across by appending all of the source paragraph's
+        // refs to the FINAL target run (a coarse but deterministic
+        // placement; finer-grained anchor migration is a future
+        // improvement once we surface character offsets out of the
+        // aligner).
+        let mut footnote_refs_all: Vec<Vec<u8>> = info
+            .runs
+            .iter()
+            .flat_map(|r| r.footnote_refs.clone())
+            .collect();
+
+        let mut runs: Vec<CoreRun> = target_runs
+            .into_iter()
+            .map(|tr| CoreRun {
+                text: tr.text,
+                rpr_xml: tr.format_id,
+                footnote_refs: Vec::new(),
+            })
+            .collect();
+        if !footnote_refs_all.is_empty() {
+            if let Some(last) = runs.last_mut() {
+                last.footnote_refs.append(&mut footnote_refs_all);
+            } else {
+                runs.push(CoreRun {
+                    text: String::new(),
+                    rpr_xml: None,
+                    footnote_refs: footnote_refs_all,
+                });
+            }
+        }
+
+        new_paragraphs.push(ParagraphInfo {
+            ppr_xml: info.ppr_xml.clone(),
+            runs,
+            leading_bookmark_starts: info.leading_bookmark_starts.clone(),
+            trailing_bookmark_ends: info.trailing_bookmark_ends.clone(),
+        });
+    }
+
+    crisp_docx_core::replace_paragraph_runs(pkg, &new_paragraphs)
+        .context("rewriting paragraph runs")?;
     Ok(())
 }
 
