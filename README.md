@@ -213,8 +213,9 @@ auto-skips when they aren't.
 | H | CrispSorter Tauri integration | ✅ |
 
 See [`PARITY.md`](./PARITY.md) for the Python ↔ Rust per-primitive
-status ledger and [`PLAN.md`](./PLAN.md) for the phased execution
-roadmap.
+status ledger, [`PLAN.md`](./PLAN.md) for the phased execution
+roadmap, and [`PUBLISH.md`](./PUBLISH.md) for the crates.io / PyPI
+release checklist.
 
 ## License
 
