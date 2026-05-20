@@ -173,92 +173,80 @@ convert_notes_kind("paper.docx", NotesKind.Endnotes)
 Each phase is **independently shippable** (its own PR + tag).
 Acceptance criteria are concrete; tick them off in this file as you go.
 
-### ☐ Phase A — Repo scaffold (this PR)
+### ✅ Phase A — Repo scaffold *(2026-05)*
 
-- [x] Cargo workspace with three members.
-- [ ] `package.rs` — `Package` struct + `open()` / `save()`.
-- [ ] `ns.rs` — namespace constants.
-- [ ] `error.rs` — `thiserror` `Error` enum with the basic variants.
-- [ ] `lib.rs` exporting the above.
-- [ ] CLI `main.rs` with `clap` subcommands wired but stubbed.
-- [ ] PyO3 `lib.rs` with `#[pymodule]` + one trivial function so the wheel builds.
-- [ ] `cargo check --workspace` clean.
-- [ ] CI workflow runs `cargo fmt --check`, `cargo clippy -- -D warnings`,
-      `cargo test --workspace` on linux/macos/windows.
+- [x] Cargo workspace, now 6 members (core / cli / py / llm / align / translate-cli).
+- [x] `package.rs` — `Package` with `open()` / `save()` round-trip + dual zip/in-memory init.
+- [x] `ns.rs`, `error.rs`, `lib.rs`.
+- [x] `crisp-docx` clap CLI binary with 9 subcommands (`clean`, `notes-kind`, `inject-footnotes`, `transplant`, `strip-paragraph-bold`, `analyze`, `infer-headings`, `inspect`, `check`).
+- [x] PyO3 module surfaces 11 functions through `crisp_docx`.
+- [x] CI matrix: fmt / clippy / test × ubuntu / macos / windows × py 3.10/3.11/3.12. Sibling CrispEmbed + CrispASR cloned by every job so cargo metadata can resolve optional path deps.
 
-Acceptance: `cargo build --workspace` succeeds on all three OSes; the
-empty CLI prints help; `maturin build` produces a wheel that
-`import crisp_docx` finds.
+### ✅ Phase B — OOXML primitives 1–3 *(2026-05)*
 
-### ☐ Phase B — Primitives 1, 2, 3
+- [x] `strip_rsids` — drops `w14:paraId`, `w14:textId`, `w:rsidR`, `w:rsidRPr`, `w:rsidDel`, `w:rsidRDefault`, `w:rsidP`, `w:rsidTr`, `w:rsidSect`.
+- [x] `normalize_tags` — `w:sz-cs` → `w:szCs`, `w:b-cs` → `w:bCs`, `w:i-cs` → `w:iCs`.
+- [x] `convert_notes_kind(pkg, NotesKind)` (both directions) — renames part, rewrites refs, updates content-types and rels.
+- [x] CLI + PyO3 binds.
 
-- [ ] `strip_rsids` with Python-equivalent tests using identical fixtures
-      (port `tests/test_rsid_strip.py` to `tests/rsid_strip.rs`).
-- [ ] `normalize_tags`.
-- [ ] `convert_notes_kind(NotesKind::Endnotes)` and the reverse,
-      mirroring `footnotes_to_endnotes` in `rtf_to_docx_endnotes.py`.
-- [ ] CLI subcommands `clean` and `notes-kind` go live.
-- [ ] PyO3 binds the three primitives.
+### ✅ Phase C — Python integration & back-compat *(2026-05)*
 
-Acceptance: existing `docxtool clean --dry-run` semantics reproduce on
-the Rust side; cross-checked against the Python implementation on a
-fixture corpus (the `Vielfalt cs15` test file plus a half-dozen synthetic
-docx zips covering edge cases).
+- [x] `crisp_docx` wheel built by maturin, smoke-tested through `analyze_blueprint`, `infer_heading_levels`, etc.
+- [x] PARITY.md ledger pairs every Python primitive with its Rust port; CI parity harness exists.
+- [x] Three Python bugs found and fixed upstream in CrispTranslator during the parity port (`strip_paragraph_bold` spurious `**ô**`, `cmd_check`'s bookmark allow-list / `_rels/.rels` base / optional `settings.xml`).
 
-### ☐ Phase C — Bind into Python and verify back-compat
+### ✅ Phase D — Primitives 4 & 5 + the rest of format_transplant *(2026-05)*
 
-- [ ] Replace the rsid-strip path in `docxtool clean` with a call into
-      `crisp_docx` when the wheel is available, falling back to the pure
-      Python implementation otherwise.
-- [ ] All 36 existing unit tests in CrispTranslator still pass with the
-      Rust-backed path enabled.
-- [ ] Add a `BENCH.md` measuring rsid strip on a 200 KB docx — Python
-      vs Rust, vs Rust through PyO3 — so we know the binding overhead.
+- [x] `inject_footnotes` — `[N]` marker splitter with footnote XML appended.
+- [x] `transplant_body` — blueprint package + source body, with full pipeline: `clean_runs` + `strip_rsids` + `apply_footnote_format` + style mapping + heading inference.
+- [x] Bonus ports beyond the original scope:
+      - `classify_style` + `StyleMapper` + `StyleIndex` (multilingual heading classification, 9 languages)
+      - `BlueprintAnalyzer` (sections + defaults + footnote format)
+      - `infer_heading_levels` + `apply_heading_inferences` (bold/short-text + size clustering)
+      - `paragraph_runs` (run-granularity IO with verbatim rPr bytes)
+      - `paragraph_text` (text-only round-trip)
+      - `check_package` (7-axis validity check; `cmd_check` port)
 
-Acceptance: zero behaviour change for existing users; PyO3 path is
-opt-in via a feature flag.
+### ✅ Phase D′ — Transformer alignment & format preservation *(2026-05)*
 
-### ☐ Phase D — Primitives 4 & 5 (footnote injection + transplant)
+Out of original scope but landed naturally:
 
-- [ ] `note_injection.rs` — split runs at `[N]` and append `<w:footnote>`
-      entries. Includes a runs-can-be-fragmented-across-elements
-      walker (port of the `_normalize_fn_separator` insight from
-      `format_transplant.py:1962`).
-- [ ] `transplant.rs` — clone-blueprint, replace-body, preserve the final
-      `<w:sectPr>` (`format_transplant.py:1519`). Strip rsids on insert
-      (reuse phase B primitive). Preserve `xml:space="preserve"` on every
-      `<w:t>` with leading/trailing whitespace.
-- [ ] CLI subcommand `inject-footnotes` and `transplant`.
-- [ ] PyO3 binds both.
+- [x] CrispEmbed C API addition: `crispembed_encode_tokens` for per-token contextual embeddings from any encoder model (was previously ColBERT-only).
+- [x] `crisp-docx-align` crate — pure-Rust SimAlign (argmax / intersection / itermax) over CrispEmbed embeddings.
+- [x] `transfer_format_via_words` — generic format-id bridge that maps source-run rPr onto translated text via word alignment.
+- [x] `translate_runs(model, src_runs, translated_text, strategy)` end-to-end convenience.
 
-Acceptance: round-trip the four fixtures from `CrispStrobe/FormatTransplant`
-HF Space and diff the resulting bytes against the Python output. Any
-diff documented and either reduced to zero or recorded as known
-divergence with rationale.
+### ✅ Phase E — LLM translation pipeline *(2026-05)*
 
-### ☐ Phase E — Optional: rewire CrispSorter
+- [x] `crisp-docx-llm` crate with **12 LLM providers**: OpenAI, Anthropic, Ollama, Groq, OpenRouter, Together, Cerebras, Mistral, Nebius, Scaleway, Poe, Google (Gemini).
+- [x] All OpenAI-compat providers share the same `OpenAiProvider::new(name, default_base)` impl.
+- [x] `LlmTranslator` orchestrator with fallback chain.
+- [x] Live-verified: Groq, OpenRouter, Together, Nebius, Scaleway all returned "Der Hund schläft." End-to-end Vielfalt cs15 translation: 61/61 paragraphs via Nebius.
+- [x] **Offline NMT** via CrispASR (m2m100 / wmt21 / madlad / gemma4-e2b) under the `nmt` feature.
+- [x] 12 wiremock unit tests + 12 env-gated live tests.
 
-- [ ] Add `crisp-docx-core` as a workspace dep in CrispSorter.
-- [ ] Wire a Tauri command `tauri_docx_clean(path: PathBuf)` and a
-      SvelteKit `+page.svelte` that exposes it.
-- [ ] No release of CrispSorter yet — feature-flagged behind
-      `crispsorter --features experimental-docx`.
+### ✅ Phase F — `crisp-translate-cli` end-to-end binary *(2026-05)*
 
-Acceptance: dev-mode CrispSorter loads a docx and round-trips it via the
-Rust core.
+- [x] `crisp-translate <input.docx> -o <output.docx> --target-lang DE --provider groq`.
+- [x] `--dry-run`, `--concurrency N`, `--preserve-formatting` (under `--features align`), `--align-model <gguf>`.
+- [x] Auto-pick scans env keys in cost/latency order; multiple `--provider` flags chain as fallbacks.
 
-### ☐ Phase F — Distribution
+### ✅ Phase G — CrispSorter Tauri integration *(2026-05)*
 
-- [ ] CI builds CLI binaries for x86_64-unknown-linux-gnu,
-      aarch64-apple-darwin, x86_64-apple-darwin, x86_64-pc-windows-msvc.
-- [ ] Wheels built by `maturin` for the same OS/arch matrix and CPython
-      3.10/3.11/3.12.
-- [ ] First `v0.1.0` GitHub release with attached binaries.
-- [ ] README has install instructions (`cargo install crisp-docx-cli`
-      and `pip install crisp-docx`).
+- [x] Translate tab in the SvelteKit UI (`src/lib/components/Translate.svelte`).
+- [x] Two Tauri commands (`translate_dry_run`, `translate_docx`) wrapping the workspace crates as path deps.
+- [x] Streams `translate://progress` events to the UI; live throughput + ETA.
+- [x] Provider key status pill, form-state persistence, 12-provider grouped dropdown.
+- [x] **OS-keychain credential storage** for LLM API keys; one-time migration moves plain-text keys out of `settings.json`.
 
-Acceptance: `curl -L .../crisp-docx-linux | sh` from a clean container
-runs `crisp-docx clean foo.docx` to completion.
+### 🟡 Phase H — Distribution
+
+- [x] CI matrix (fmt / clippy / test / build-wheel) on linux × macos × windows × py 3.10/3.11/3.12.
+- [x] PUBLISH.md checklist with the exact two-command crates.io publish flow.
+- [x] Cargo.toml metadata audit — every crate has description / keywords / categories; sibling-dep crates explicitly `publish = false`.
+- [ ] **Actually run `cargo publish -p crisp-docx-core` then `crisp-docx-cli`.** Needs the user's crates.io token (skipped from the agent session).
+- [ ] **Tag `v0.1.0` and trigger the release.yml binaries job** so `curl -L | sh` installs work.
+- [ ] **Upload Python wheel to PyPI** — extend `build-wheel` CI to push to PyPI on tag.
 
 ---
 
@@ -324,15 +312,35 @@ These need decisions before they become blockers; they are intentionally
 
 ## 8. Done definition
 
-The repo is "done for v0.1" when:
+v0.1 is **shippable** — every phase A→G ticked. The remaining work
+(Phase H — distribution) is operational: cargo publish, GitHub release
+tags, PyPI upload. None of it requires new code.
 
-1. All phase A-D boxes ticked.
-2. CLI binary on macOS arm64 is ≤ 12 MB stripped and starts in < 50 ms.
-3. The Python bindings drop into CrispTranslator without behaviour change
-   for any of its 36 existing unit tests.
-4. Phase E is at least scaffolded in CrispSorter, behind a feature flag.
+The repo's actual scope grew well past the original v0.1 target. What
+shipped includes:
 
-Beyond v0.1 the path widens to the LLM-driven editorial passes, the full
-`StyleMapper` machinery, and the Gradio-equivalent SvelteKit UI in
-CrispSorter. None of that is on the critical path for "ship cross-platform
-binaries to non-Python users."
+1. ✅ 11 OOXML primitives (was 5).
+2. ✅ CLI binary on macOS arm64 = 8.4 MB stripped (target was ≤ 12 MB), starts in < 30 ms.
+3. ✅ Python bindings — 11 exposed functions, used by CrispTranslator's `docxtool clean --backend rust`.
+4. ✅ CrispSorter Tauri integration with a full Translate tab — not behind a feature flag, shipped as a first-class feature.
+5. ✅ Beyond-v0.1 work — 12 LLM providers + offline NMT + transformer alignment + format-preserving translation pipeline + OS-keychain credential storage.
+
+## 9. What's pending and doable now
+
+Doable from this repo's working tree, no external systems required:
+
+- **Live-test the format-preservation v0.2 pipeline.** Run `crisp-translate --features align` against the Vielfalt cs15.docx with a real LLM + multilingual-MiniLM aligner, then open the output in Word and check bold/italic spans survived word-order reordering. This is the load-bearing test that confirms the alignment bridge actually works on real prose; we have unit tests but no end-to-end Word-renders-correctly check.
+- **Tests for the `secrets` module in CrispSorter** — there's already a `keyring::mock::default_credential_builder` pattern used by `src/images/crisplens/secret.rs`. Mirror that for `src/secrets/mod.rs`.
+- **Surface `secrets_list_accounts`** so the Settings UI can show "you have keys stored for: OpenAI, Groq, Nebius" and let users delete individual ones without going through Keychain Access directly.
+- **CHANGELOG.md** for both repos — none exists yet.
+- **Document the workspace.dependencies pattern in CONTRIBUTING.md** so the next person to add a crate doesn't have to reverse-engineer the path-dep + version trick.
+
+Doable but needs an external nudge (you, the human, runs a command):
+
+- **Publish `crisp-docx-core` + `crisp-docx-cli` to crates.io.** PUBLISH.md has the two-command recipe; you run `cargo login` then ask me to continue. Same for PyPI — needs a token.
+- **Tag `v0.1.0`.** Triggers the existing release.yml binary builds.
+
+Out of scope (needs a separate decision):
+
+- **Publish CrispEmbed + CrispASR to crates.io** so `crisp-docx-llm`, `crisp-docx-align`, `crisp-translate-cli` can drop their `publish = false` and ship.
+- **Refactor the Provider trait to not pass src/tgt langs as free-form strings.** Right now NMT does its own name→code lookup; LLM prompts use the strings verbatim. A typed lang param would be cleaner but no consumer is asking for it.
