@@ -31,6 +31,22 @@ bytes. Out-of-scope for now (deliberate, see [PLAN.md](PLAN.md) phase E+):
 - Pandoc subprocess orchestration. Pandoc is an external tool; Rust ports
   call the same binary the same way (when needed).
 
+### Reclassified ✅ (2026-05-20)
+
+- **NMT backends** (m2m100, wmt21, madlad, gemma4-e2b) were listed
+  under "huge mature Python ecosystems" — but the
+  [CrispASR](https://github.com/CrispStrobe/CrispASR) sister project
+  now ships them as ggml C++ implementations with a clean Rust safe
+  wrapper. The `crisp-docx-llm` crate gains a `ProviderKind::Nmt`
+  variant behind the `nmt` Cargo feature; it wraps
+  `crispasr::Session::translate_text(text, src_lang, tgt_lang,
+  max_tokens)` and runs entirely in-process, no network. The
+  language-name → ISO-639-1 code conversion happens via
+  `nmt::map_lang_to_code` for the 35 major European/Asian languages.
+  Composes with the existing fallback chain (set NMT first for
+  cost, OpenAI last for quality). Live-verified on `m2m100-418m-q8_0.gguf`:
+  EN↔DE round-trips clean.
+
 ### Reclassified ✅ (2026-05-19)
 
 - **SimAlign-style transformer alignment** was previously listed under
@@ -108,7 +124,7 @@ in PLAN.md.
 | `HeuristicAligner` (length-ratio fallback) | ~20 | not yet | ⏳ | Trivial to port. Defer until a real consumer asks. |
 | `LindatAligner` (HTTP API call) | ~40 | n/a | 🚫 | Online aligner; orthogonal to the offline path. |
 | `MultiAligner` (orchestrator) | ~80 | n/a (orchestrator) | 🚫 | Composes the others. Caller-level concern. |
-| NMT backends (NLLB / OpusMT / Madlad400 / CTranslate2) | ~600 | n/a | 🚫 | Requires PyTorch / HF transformers / ctranslate2 — Rust has no comparable model coverage. |
+| NMT backends (NLLB / OpusMT / Madlad400 / CTranslate2) | ~600 | `crisp-docx-llm::ProviderKind::Nmt` (via CrispASR) | ✅ | Reclassified 2026-05-20 — see [section above](#reclassified--2026-05-20). The Rust port goes through CrispASR's ggml C++ runtime: m2m100 (100 langs any-to-any), wmt21 (EN-paired, higher quality on the supported pairs), madlad (419 langs via prefix tag), gemma4-e2b (140+ langs, dual ASR+MT). Gated behind the `nmt` feature so default builds don't compile the C++. Surfaced as a Provider so it composes with the cloud fallback chain. |
 | `LLMTranslator` (OpenAI / Anthropic / Ollama / Groq HTTP clients) | ~300 | `crisp-docx-llm` crate (`LlmTranslator` + 4 providers) | ✅ | Full port. reqwest + tokio + async-trait. Provider trait abstraction lets the fallback chain mix any subset. 16 unit tests (incl. wiremock-driven wire-format tests for all 4 providers and the fallback path) + 4 env-gated live tests against real APIs. |
 | `UltimateDocumentTranslator` (orchestrator) | ~580 | `crisp-translate-cli` binary (`crisp-translate`) | 🟡 | Working end-to-end docx-to-docx translation with `--provider`/`--model`/`--source-lang`/`--target-lang`/`--dry-run`/`--concurrency`. Verified on Vielfalt cs15.docx: extracts 61 paragraphs cleanly. v0.1 preserves paragraph-level structure (pStyle, sections, footnote refs); intra-paragraph runs collapse to one. **v0.2 building blocks landed** — see new rows below for run-level extract/replace + alignment-driven format-transfer. CLI wiring + opt-in flag is the next step. |
 | `paragraph_runs::{extract,replace}_paragraphs` (run-level IO) | n/a | `crisp-docx-core::{extract,replace}_paragraph_runs` | ✅ | New core module. `ParagraphInfo` carries verbatim pPr bytes, an ordered Vec<Run> with each run's text + verbatim rPr bytes + captured footnote refs, plus leading bookmark starts and trailing bookmark ends. 8 unit tests including round-trip on bold/italic mix, footnote-ref preservation, multi-paragraph. |
