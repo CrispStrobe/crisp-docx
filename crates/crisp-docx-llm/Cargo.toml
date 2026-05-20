@@ -6,6 +6,14 @@ description = "Async LLM HTTP clients (OpenAI / Anthropic / Ollama / Groq) for u
 license     = { workspace = true }
 repository  = { workspace = true }
 
+[features]
+default = []
+# Opt-in: pulls in CrispASR as a local NMT backend (m2m100 / wmt21 /
+# madlad / gemma4-e2b — see CrispStrobe/CrispASR). Adds minutes to the
+# first build because the C++ runtime is compiled in. Required for the
+# `ProviderKind::Nmt` variant.
+nmt = ["dep:crispasr"]
+
 [dependencies]
 async-trait = { workspace = true }
 futures     = { workspace = true }
@@ -15,6 +23,11 @@ serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 tokio       = { workspace = true }
 tracing     = { workspace = true }
+
+# CrispASR offline NMT backend (m2m100 / wmt21 / …). Path dep is a
+# sibling checkout — the same pattern crisp-docx-align uses for
+# CrispEmbed. Loaded only when the `nmt` feature is enabled.
+crispasr = { path = "../../../CrispASR/crispasr", version = "0.5", optional = true }
 
 [dev-dependencies]
 tokio    = { workspace = true, features = ["macros", "rt-multi-thread"] }

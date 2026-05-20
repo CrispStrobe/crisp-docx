@@ -78,10 +78,15 @@ impl LlmTranslator {
         if self.providers.is_empty() {
             return Err(Error::NoProviders);
         }
-        let prompt = build_prompt(text, src_lang, tgt_lang, use_alignment_hint);
+        let mut opts = self.options.clone();
+        opts.prompt_style = if use_alignment_hint {
+            crate::providers::PromptStyle::PreserveOrder
+        } else {
+            crate::providers::PromptStyle::Fluent
+        };
         let mut last_err: Option<Error> = None;
         for p in &self.providers {
-            match p.translate(&prompt, &self.options).await {
+            match p.translate(text, src_lang, tgt_lang, &opts).await {
                 Ok(out) => return Ok(out),
                 Err(e) => {
                     tracing::debug!(provider = p.name(), error = %e, "translate failed");
@@ -125,25 +130,14 @@ impl Default for LlmTranslator {
     }
 }
 
-fn build_prompt(text: &str, src_lang: &str, tgt_lang: &str, use_alignment_hint: bool) -> String {
-    let style_clause = if use_alignment_hint {
-        "Preserve the word order as much as possible for alignment purposes."
-    } else {
-        "Provide a natural, fluent translation."
-    };
-    format!(
-        "Translate the following text from {src_lang} to {tgt_lang}. {style_clause} \
-         Return ONLY the translation:\n\n{text}"
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::providers::{build_translation_prompt, PromptStyle};
 
     #[test]
     fn prompt_uses_alignment_clause_when_requested() {
-        let p = build_prompt("Hello.", "English", "German", true);
+        let p = build_translation_prompt("Hello.", "English", "German", PromptStyle::PreserveOrder);
         assert!(p.contains("Hello."));
         assert!(p.contains("from English to German"));
         assert!(p.contains("Preserve the word order"));
@@ -152,7 +146,7 @@ mod tests {
 
     #[test]
     fn prompt_uses_fluency_clause_otherwise() {
-        let p = build_prompt("Hello.", "English", "German", false);
+        let p = build_translation_prompt("Hello.", "English", "German", PromptStyle::Fluent);
         assert!(p.contains("natural, fluent"));
         assert!(!p.contains("Preserve the word order"));
     }

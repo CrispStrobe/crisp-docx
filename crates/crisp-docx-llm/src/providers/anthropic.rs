@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::{ModelInfo, Provider, ProviderConfig, TranslateOptions};
+use super::{build_translation_prompt, ModelInfo, Provider, ProviderConfig, TranslateOptions};
 use crate::Error;
 
 const DEFAULT_BASE: &str = "https://api.anthropic.com/v1";
@@ -76,13 +76,20 @@ impl Provider for AnthropicProvider {
         "anthropic"
     }
 
-    async fn translate(&self, prompt: &str, opts: &TranslateOptions) -> Result<String, Error> {
+    async fn translate(
+        &self,
+        text: &str,
+        src_lang: &str,
+        tgt_lang: &str,
+        opts: &TranslateOptions,
+    ) -> Result<String, Error> {
+        let prompt = build_translation_prompt(text, src_lang, tgt_lang, opts.prompt_style);
         let url = format!("{}/messages", self.base_url);
         let body = MessagesRequest {
             model: &self.model,
             messages: vec![Message {
                 role: "user",
-                content: prompt,
+                content: &prompt,
             }],
             temperature: opts.temperature,
             max_tokens: opts.max_tokens,
