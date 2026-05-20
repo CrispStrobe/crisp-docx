@@ -89,6 +89,14 @@ enum ProviderKindArg {
     Anthropic,
     Ollama,
     Groq,
+    Openrouter,
+    Together,
+    Cerebras,
+    Mistral,
+    Nebius,
+    Scaleway,
+    Poe,
+    Google,
 }
 
 impl From<ProviderKindArg> for ProviderKind {
@@ -98,6 +106,14 @@ impl From<ProviderKindArg> for ProviderKind {
             ProviderKindArg::Anthropic => ProviderKind::Anthropic,
             ProviderKindArg::Ollama => ProviderKind::Ollama,
             ProviderKindArg::Groq => ProviderKind::Groq,
+            ProviderKindArg::Openrouter => ProviderKind::OpenRouter,
+            ProviderKindArg::Together => ProviderKind::Together,
+            ProviderKindArg::Cerebras => ProviderKind::Cerebras,
+            ProviderKindArg::Mistral => ProviderKind::Mistral,
+            ProviderKindArg::Nebius => ProviderKind::Nebius,
+            ProviderKindArg::Scaleway => ProviderKind::Scaleway,
+            ProviderKindArg::Poe => ProviderKind::Poe,
+            ProviderKindArg::Google => ProviderKind::Google,
         }
     }
 }
@@ -363,17 +379,30 @@ async fn translate_with_concurrency(
 }
 
 fn auto_pick_providers() -> Vec<ProviderKindArg> {
+    // Preference order: a) cheapest / fastest (Groq, Cerebras) first
+    // because they're rate-limited free tiers good for batch work;
+    // b) cloud frontier (OpenAI, Anthropic) next; c) Together /
+    // OpenRouter / Nebius / Scaleway / Mistral / Poe last. Ollama is
+    // local and intentionally not auto-picked.
     let mut out = Vec::new();
-    if std::env::var("OPENAI_API_KEY").is_ok() {
-        out.push(ProviderKindArg::Openai);
+    let candidates = [
+        (ProviderKindArg::Groq, "GROQ_API_KEY"),
+        (ProviderKindArg::Cerebras, "CEREBRAS_API_KEY"),
+        (ProviderKindArg::Openai, "OPENAI_API_KEY"),
+        (ProviderKindArg::Anthropic, "ANTHROPIC_API_KEY"),
+        (ProviderKindArg::Together, "TOGETHER_API_KEY"),
+        (ProviderKindArg::Openrouter, "OPENROUTER_API_KEY"),
+        (ProviderKindArg::Nebius, "NEBIUS_API_KEY"),
+        (ProviderKindArg::Scaleway, "SCALEWAY_API_KEY"),
+        (ProviderKindArg::Mistral, "MISTRAL_API_KEY"),
+        (ProviderKindArg::Poe, "POE_API_KEY"),
+        (ProviderKindArg::Google, "GOOGLEAI_API_KEY"),
+    ];
+    for (kind, var) in candidates {
+        if std::env::var(var).is_ok() {
+            out.push(kind);
+        }
     }
-    if std::env::var("ANTHROPIC_API_KEY").is_ok() {
-        out.push(ProviderKindArg::Anthropic);
-    }
-    if std::env::var("GROQ_API_KEY").is_ok() {
-        out.push(ProviderKindArg::Groq);
-    }
-    // Ollama is local — leave to the user to opt in via --provider.
     out
 }
 
@@ -383,6 +412,23 @@ fn build_provider_config(kind: ProviderKindArg, model: Option<String>) -> Result
         ProviderKindArg::Anthropic => (Some("ANTHROPIC_API_KEY"), "claude-3-5-sonnet-20241022"),
         ProviderKindArg::Groq => (Some("GROQ_API_KEY"), "llama-3.3-70b-versatile"),
         ProviderKindArg::Ollama => (None, "llama3.2"),
+        ProviderKindArg::Openrouter => (
+            Some("OPENROUTER_API_KEY"),
+            "meta-llama/llama-3.3-70b-instruct",
+        ),
+        ProviderKindArg::Together => (
+            Some("TOGETHER_API_KEY"),
+            "meta-llama/Llama-3.3-70B-Instruct-Turbo",
+        ),
+        ProviderKindArg::Cerebras => (Some("CEREBRAS_API_KEY"), "llama-3.3-70b"),
+        ProviderKindArg::Mistral => (Some("MISTRAL_API_KEY"), "mistral-large-latest"),
+        ProviderKindArg::Nebius => (
+            Some("NEBIUS_API_KEY"),
+            "meta-llama/Llama-3.3-70B-Instruct",
+        ),
+        ProviderKindArg::Scaleway => (Some("SCALEWAY_API_KEY"), "llama-3.3-70b-instruct"),
+        ProviderKindArg::Poe => (Some("POE_API_KEY"), "GPT-4o-mini"),
+        ProviderKindArg::Google => (Some("GOOGLEAI_API_KEY"), "gemini-2.0-flash"),
     };
     let api_key = match api_key_env {
         Some(var) => Some(std::env::var(var).map_err(|_| {
@@ -414,6 +460,14 @@ impl ProviderKindName for ProviderKind {
             ProviderKind::Anthropic => "anthropic",
             ProviderKind::Ollama => "ollama",
             ProviderKind::Groq => "groq",
+            ProviderKind::OpenRouter => "openrouter",
+            ProviderKind::Together => "together",
+            ProviderKind::Cerebras => "cerebras",
+            ProviderKind::Mistral => "mistral",
+            ProviderKind::Nebius => "nebius",
+            ProviderKind::Scaleway => "scaleway",
+            ProviderKind::Poe => "poe",
+            ProviderKind::Google => "google",
         }
     }
 }

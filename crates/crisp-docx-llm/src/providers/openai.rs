@@ -1,9 +1,14 @@
-//! OpenAI (`/v1/chat/completions`) and Groq (same shape, different host).
+//! OpenAI Chat Completions wire format + every provider that ships the
+//! same wire-shape under a different host.
 //!
-//! Groq exposes the OpenAI Chat Completions API verbatim — same request
-//! body, same response shape — at a different base URL. We reuse the
-//! OpenAI provider with `is_groq=true` toggling only the default host
-//! and the static `name()` string.
+//! Most "AI gateway" services (Groq, OpenRouter, Together, Cerebras,
+//! Mistral, Nebius, Scaleway, Poe) expose the OpenAI Chat Completions
+//! API verbatim. They all accept the same request body
+//! (`{model, messages, temperature, max_tokens}`), use
+//! `Authorization: Bearer …` for auth, and return the same response
+//! shape (`choices[0].message.content`). We reuse one [`OpenAiProvider`]
+//! impl for all of them; only the static name + default base URL
+//! differ.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -11,9 +16,6 @@ use serde_json::Value;
 
 use super::{ModelInfo, Provider, ProviderConfig, TranslateOptions};
 use crate::Error;
-
-const OPENAI_DEFAULT_BASE: &str = "https://api.openai.com/v1";
-const GROQ_DEFAULT_BASE: &str = "https://api.groq.com/openai/v1";
 
 pub(crate) struct OpenAiProvider {
     name: &'static str,
@@ -24,28 +26,27 @@ pub(crate) struct OpenAiProvider {
 }
 
 impl OpenAiProvider {
-    pub(crate) fn new(cfg: ProviderConfig, is_groq: bool) -> Result<Self, Error> {
-        let api_key = cfg.api_key.ok_or_else(|| {
-            Error::Config(format!(
-                "{} requires api_key",
-                if is_groq { "groq" } else { "openai" }
-            ))
-        })?;
-        let default_base = if is_groq {
-            GROQ_DEFAULT_BASE
-        } else {
-            OPENAI_DEFAULT_BASE
-        };
+    /// Build an OpenAI-compatible provider. `name` is the static tag
+    /// used in errors/logs; `default_base` is the host used when the
+    /// caller didn't override `cfg.base_url`.
+    pub(crate) fn new(
+        cfg: ProviderConfig,
+        name: &'static str,
+        default_base: &'static str,
+    ) -> Result<Self, Error> {
+        let api_key = cfg
+            .api_key
+            .ok_or_else(|| Error::Config(format!("{name} requires api_key")))?;
         let base_url = cfg.base_url.unwrap_or_else(|| default_base.to_string());
         let http = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(120))
             .build()
             .map_err(|e| Error::Http {
-                provider: if is_groq { "groq" } else { "openai" },
+                provider: name,
                 source: e,
             })?;
         Ok(Self {
-            name: if is_groq { "groq" } else { "openai" },
+            name,
             api_key,
             model: cfg.model,
             base_url,

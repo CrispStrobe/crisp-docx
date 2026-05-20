@@ -130,3 +130,107 @@ async fn live_ollama_translates_to_german() {
     eprintln!("Ollama → {:?}", out);
     assert!(looks_like_german(&out), "unexpected: {:?}", out);
 }
+
+/// Generic live test for OpenAI-compatible providers: takes a provider
+/// kind + env-var prefix and runs the same translate-to-German assertion.
+macro_rules! live_openai_compatible {
+    ($name:ident, $kind:ident, $env_flag:literal, $key_env:literal, $model_env:literal, $default_model:literal) => {
+        #[tokio::test]
+        async fn $name() {
+            if !enabled($env_flag) {
+                eprintln!("{} not set; skipping", $env_flag);
+                return;
+            }
+            let Ok(key) = std::env::var($key_env) else {
+                eprintln!("{} missing; skipping", $key_env);
+                return;
+            };
+            let t = LlmTranslator::new()
+                .add_provider(ProviderConfig {
+                    kind: ProviderKind::$kind,
+                    api_key: Some(key),
+                    model: std::env::var($model_env).unwrap_or_else(|_| $default_model.into()),
+                    base_url: None,
+                })
+                .unwrap();
+            let out = t
+                .translate_text("The dog is sleeping.", "English", "German")
+                .await
+                .unwrap_or_else(|e| panic!("{}: {e}", stringify!($name)));
+            eprintln!("{} → {:?}", stringify!($kind), out);
+            assert!(looks_like_german(&out), "unexpected: {:?}", out);
+        }
+    };
+}
+
+live_openai_compatible!(
+    live_openrouter_translates_to_german,
+    OpenRouter,
+    "CRISP_DOCX_LLM_LIVE_OPENROUTER",
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_MODEL",
+    "meta-llama/llama-3.3-70b-instruct"
+);
+
+live_openai_compatible!(
+    live_together_translates_to_german,
+    Together,
+    "CRISP_DOCX_LLM_LIVE_TOGETHER",
+    "TOGETHER_API_KEY",
+    "TOGETHER_MODEL",
+    "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+);
+
+live_openai_compatible!(
+    live_cerebras_translates_to_german,
+    Cerebras,
+    "CRISP_DOCX_LLM_LIVE_CEREBRAS",
+    "CEREBRAS_API_KEY",
+    "CEREBRAS_MODEL",
+    "llama-3.3-70b"
+);
+
+live_openai_compatible!(
+    live_nebius_translates_to_german,
+    Nebius,
+    "CRISP_DOCX_LLM_LIVE_NEBIUS",
+    "NEBIUS_API_KEY",
+    "NEBIUS_MODEL",
+    "meta-llama/Llama-3.3-70B-Instruct"
+);
+
+live_openai_compatible!(
+    live_scaleway_translates_to_german,
+    Scaleway,
+    "CRISP_DOCX_LLM_LIVE_SCALEWAY",
+    "SCALEWAY_API_KEY",
+    "SCALEWAY_MODEL",
+    "llama-3.3-70b-instruct"
+);
+
+live_openai_compatible!(
+    live_mistral_translates_to_german,
+    Mistral,
+    "CRISP_DOCX_LLM_LIVE_MISTRAL",
+    "MISTRAL_API_KEY",
+    "MISTRAL_MODEL",
+    "mistral-large-latest"
+);
+
+live_openai_compatible!(
+    live_poe_translates_to_german,
+    Poe,
+    "CRISP_DOCX_LLM_LIVE_POE",
+    "POE_API_KEY",
+    "POE_MODEL",
+    "GPT-4o-mini"
+);
+
+live_openai_compatible!(
+    live_google_translates_to_german,
+    Google,
+    "CRISP_DOCX_LLM_LIVE_GOOGLE",
+    "GOOGLEAI_API_KEY",
+    "GOOGLE_MODEL",
+    "gemini-2.0-flash"
+);

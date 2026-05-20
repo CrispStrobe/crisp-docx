@@ -14,8 +14,11 @@ mod anthropic;
 mod ollama;
 mod openai;
 
-/// Which LLM provider to talk to. Groq uses OpenAI's wire format with a
-/// different base URL, so it reuses the OpenAI client.
+/// Which LLM provider to talk to. Many providers ship the OpenAI Chat
+/// Completions API verbatim under a different host (Groq, OpenRouter,
+/// Together, Cerebras, Mistral, Nebius, Scaleway, Poe) — they all reuse
+/// the same OpenAI client impl, just with a different name + default
+/// base URL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
@@ -27,6 +30,28 @@ pub enum ProviderKind {
     Ollama,
     /// Groq's OpenAI-compatible API at `https://api.groq.com/openai/v1`.
     Groq,
+    /// OpenRouter's OpenAI-compatible aggregator at
+    /// `https://openrouter.ai/api/v1`.
+    OpenRouter,
+    /// Together.ai's OpenAI-compatible endpoint at
+    /// `https://api.together.xyz/v1`.
+    Together,
+    /// Cerebras' OpenAI-compatible inference API at
+    /// `https://api.cerebras.ai/v1`.
+    Cerebras,
+    /// Mistral's OpenAI-compatible API at `https://api.mistral.ai/v1`.
+    Mistral,
+    /// Nebius AI Studio's OpenAI-compatible API at
+    /// `https://api.studio.nebius.ai/v1`.
+    Nebius,
+    /// Scaleway's OpenAI-compatible inference API at
+    /// `https://api.scaleway.ai/v1`.
+    Scaleway,
+    /// Poe's OpenAI-compatible API at `https://api.poe.com/v1`.
+    Poe,
+    /// Google Gemini's OpenAI-compatible endpoint at
+    /// `https://generativelanguage.googleapis.com/v1beta/openai`.
+    Google,
 }
 
 /// Configuration for a single provider in the fallback chain.
@@ -47,10 +72,60 @@ pub struct ProviderConfig {
 impl ProviderConfig {
     pub(crate) fn into_provider(self) -> Result<Box<dyn Provider>, Error> {
         match self.kind {
-            ProviderKind::OpenAi => Ok(Box::new(openai::OpenAiProvider::new(self, false)?)),
-            ProviderKind::Groq => Ok(Box::new(openai::OpenAiProvider::new(self, true)?)),
             ProviderKind::Anthropic => Ok(Box::new(anthropic::AnthropicProvider::new(self)?)),
             ProviderKind::Ollama => Ok(Box::new(ollama::OllamaProvider::new(self)?)),
+            // OpenAI-compatible providers — same wire format, different
+            // (name, default_base_url) tuples.
+            ProviderKind::OpenAi => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "openai",
+                "https://api.openai.com/v1",
+            )?)),
+            ProviderKind::Groq => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "groq",
+                "https://api.groq.com/openai/v1",
+            )?)),
+            ProviderKind::OpenRouter => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "openrouter",
+                "https://openrouter.ai/api/v1",
+            )?)),
+            ProviderKind::Together => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "together",
+                "https://api.together.xyz/v1",
+            )?)),
+            ProviderKind::Cerebras => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "cerebras",
+                "https://api.cerebras.ai/v1",
+            )?)),
+            ProviderKind::Mistral => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "mistral",
+                "https://api.mistral.ai/v1",
+            )?)),
+            ProviderKind::Nebius => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "nebius",
+                "https://api.studio.nebius.ai/v1",
+            )?)),
+            ProviderKind::Scaleway => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "scaleway",
+                "https://api.scaleway.ai/v1",
+            )?)),
+            ProviderKind::Poe => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "poe",
+                "https://api.poe.com/v1",
+            )?)),
+            ProviderKind::Google => Ok(Box::new(openai::OpenAiProvider::new(
+                self,
+                "google",
+                "https://generativelanguage.googleapis.com/v1beta/openai",
+            )?)),
         }
     }
 }
