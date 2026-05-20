@@ -228,13 +228,8 @@ async fn main() -> Result<()> {
 
     #[cfg(feature = "align")]
     if cli.preserve_formatting {
-        write_back_preserving_formatting(
-            &mut pkg,
-            &cli,
-            &paragraphs,
-            &translations,
-        )
-        .context("write-back with format preservation")?;
+        write_back_preserving_formatting(&mut pkg, &cli, &paragraphs, &translations)
+            .context("write-back with format preservation")?;
         crisp_docx_core::save(&pkg, &cli.output)
             .with_context(|| format!("saving to {}", cli.output.display()))?;
         info!("wrote {}", cli.output.display());
@@ -264,8 +259,8 @@ fn write_back_preserving_formatting(
     src_texts: &[String],
     translations: &[Result<String, crisp_docx_llm::Error>],
 ) -> Result<()> {
-    use crisp_docx_align::{transfer_format_via_words, SourceRun, Strategy};
     use crisp_docx_align::align_texts;
+    use crisp_docx_align::{transfer_format_via_words, SourceRun, Strategy};
     use crisp_docx_core::{ParagraphInfo, Run as CoreRun};
     use crispembed::CrispEmbed;
 
@@ -318,16 +313,15 @@ fn write_back_preserving_formatting(
             })
             .collect();
 
-        let alignment = align_texts(&mut model, &src_text, translation, Strategy::Itermax {
-            min_sim: 0.3,
-        })
-        .with_context(|| format!("aligning paragraph {i}"))?;
-        let target_runs = transfer_format_via_words(
-            &source_runs,
+        let alignment = align_texts(
+            &mut model,
+            &src_text,
             translation,
-            &alignment.word_edges,
-            None,
-        );
+            Strategy::Itermax { min_sim: 0.3 },
+        )
+        .with_context(|| format!("aligning paragraph {i}"))?;
+        let target_runs =
+            transfer_format_via_words(&source_runs, translation, &alignment.word_edges, None);
 
         // Convert TargetRun<Option<Vec<u8>>> into core Run + carry
         // footnote refs across by appending all of the source paragraph's
@@ -411,9 +405,7 @@ async fn translate_with_concurrency(
                     } else {
                         0
                     };
-                    eprintln!(
-                        "  …{n}/{total}  {rate_per_min:.1} par/min  ETA {eta}s",
-                    );
+                    eprintln!("  …{n}/{total}  {rate_per_min:.1} par/min  ETA {eta}s",);
                 }
                 r
             }
@@ -468,10 +460,7 @@ fn build_provider_config(kind: ProviderKindArg, model: Option<String>) -> Result
         ),
         ProviderKindArg::Cerebras => (Some("CEREBRAS_API_KEY"), "llama-3.3-70b"),
         ProviderKindArg::Mistral => (Some("MISTRAL_API_KEY"), "mistral-large-latest"),
-        ProviderKindArg::Nebius => (
-            Some("NEBIUS_API_KEY"),
-            "meta-llama/Llama-3.3-70B-Instruct",
-        ),
+        ProviderKindArg::Nebius => (Some("NEBIUS_API_KEY"), "meta-llama/Llama-3.3-70B-Instruct"),
         ProviderKindArg::Scaleway => (Some("SCALEWAY_API_KEY"), "llama-3.3-70b-instruct"),
         ProviderKindArg::Poe => (Some("POE_API_KEY"), "GPT-4o-mini"),
         ProviderKindArg::Google => (Some("GOOGLEAI_API_KEY"), "gemini-2.0-flash"),

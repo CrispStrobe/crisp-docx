@@ -43,9 +43,9 @@ impl NmtProvider {
                 "nmt provider requires `model` to be the GGUF file path".into(),
             ));
         }
-        let session = crispasr::Session::open(&path).map_err(|e| Error::Config(format!(
-            "failed to open CrispASR session for {path}: {e}"
-        )))?;
+        let session = crispasr::Session::open(&path).map_err(|e| {
+            Error::Config(format!("failed to open CrispASR session for {path}: {e}"))
+        })?;
         Ok(Self {
             model_path: path,
             session: std::sync::Mutex::new(session),

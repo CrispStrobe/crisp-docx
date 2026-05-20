@@ -16,7 +16,6 @@ pub mod nmt;
 mod ollama;
 mod openai;
 
-
 /// Which LLM provider to talk to. Many providers ship the OpenAI Chat
 /// Completions API verbatim under a different host (Groq, OpenRouter,
 /// Together, Cerebras, Mistral, Nebius, Scaleway, Poe) — they all reuse
