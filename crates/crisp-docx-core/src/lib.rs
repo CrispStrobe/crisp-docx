@@ -33,6 +33,7 @@ mod heading_inference;
 mod normalize_tags;
 mod note_injection;
 mod notes_kind;
+mod paragraph_runs;
 mod paragraph_text;
 mod rsid_strip;
 mod strip_paragraph_bold;
@@ -50,6 +51,10 @@ pub use normalize_tags::normalize_tags;
 pub use note_injection::{inject_footnotes, InjectionReport};
 pub use notes_kind::{convert_notes_kind, NotesKind};
 pub use package::Package;
+pub use paragraph_runs::{
+    extract_paragraphs as extract_paragraph_runs, replace_paragraphs as replace_paragraph_runs,
+    ParagraphInfo, Run,
+};
 pub use paragraph_text::{extract_paragraph_texts, replace_paragraph_texts};
 pub use rsid_strip::strip_rsids;
 pub use strip_paragraph_bold::strip_paragraph_bold;

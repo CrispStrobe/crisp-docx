@@ -42,6 +42,7 @@
 
 mod algorithm;
 mod errors;
+mod format_transfer;
 mod subword;
 
 #[cfg(feature = "crispembed")]
@@ -52,7 +53,10 @@ pub use algorithm::{
     Strategy,
 };
 pub use errors::Error;
+pub use format_transfer::{transfer_format_via_words, SourceRun, TargetRun};
 pub use subword::{group_subwords_to_words, TokenizerKind, WordGroup};
 
 #[cfg(feature = "crispembed")]
 pub use embed::{align_texts, TextAlignment};
+#[cfg(feature = "crispembed")]
+pub use format_transfer::{translate_runs, TranslatedRuns};
