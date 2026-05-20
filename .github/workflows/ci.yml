@@ -1,5 +1,16 @@
 name: ci
 
+# crisp-docx workspace members `crisp-docx-align` and `crisp-translate-cli`
+# carry a path dep on `../../CrispEmbed/crispembed` (optional + dev-deps).
+# Cargo metadata resolves the manifest even when the optional feature
+# is OFF, so CI must have the CrispEmbed repo present at the expected
+# sibling location or every cargo command fails before it starts.
+#
+# What actually compiles: only crisp-docx-* crates. CrispEmbed's C++
+# (ggml) runtime is NOT built unless a `--features crispembed` or
+# `--features align` is passed, which we don't do in any of the
+# default jobs.
+
 on:
   push:
     branches: [main]
@@ -16,24 +27,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: crisp-docx
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispEmbed
+          path: CrispEmbed
+          submodules: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
-      - run: cargo fmt --all --check
+      - working-directory: crisp-docx
+        run: cargo fmt --all --check
 
   clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: crisp-docx
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispEmbed
+          path: CrispEmbed
+          submodules: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: clippy core + cli
+      - name: clippy core + cli (no align feature — CrispEmbed C++ runtime not compiled)
+        working-directory: crisp-docx
         run: cargo clippy --workspace --exclude crisp-docx-py --all-targets -- -D warnings
       - name: clippy py bindings
+        working-directory: crisp-docx
         env:
           PYO3_PYTHON: ${{ env.pythonLocation }}/bin/python
         run: cargo clippy -p crisp-docx-py -- -D warnings
@@ -46,8 +74,16 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: crisp-docx
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispEmbed
+          path: CrispEmbed
+          submodules: false
       - uses: dtolnay/rust-toolchain@stable
       - name: Rust core + CLI tests
+        working-directory: crisp-docx
         run: cargo test --workspace --exclude crisp-docx-py
 
   build-wheel:
@@ -59,6 +95,13 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: crisp-docx
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispEmbed
+          path: CrispEmbed
+          submodules: false
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -66,10 +109,10 @@ jobs:
       - name: Install maturin
         run: pip install maturin
       - name: Build wheel
-        working-directory: crates/crisp-docx-py
+        working-directory: crisp-docx/crates/crisp-docx-py
         run: maturin build --release --out dist
       - name: Install + smoke test
-        working-directory: crates/crisp-docx-py
+        working-directory: crisp-docx/crates/crisp-docx-py
         run: |
           pip install --find-links dist crisp_docx
           python -c "import crisp_docx; print(crisp_docx.__version__)"
