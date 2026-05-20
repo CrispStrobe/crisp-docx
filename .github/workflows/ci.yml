@@ -106,6 +106,44 @@ jobs:
         working-directory: crisp-docx
         run: cargo test --workspace --exclude crisp-docx-py
 
+  # Verifies every feature combination of `crisp-translate-cli` at least
+  # type-checks. The default build is covered by the `test` job above;
+  # this job catches regressions in feature gating (a missing `#[cfg]`
+  # arm, an unused import that surfaces only with a feature on, etc).
+  #
+  # We use `cargo check` instead of full builds because we don't need
+  # to actually link CrispEmbed / CrispASR's C++ — the type-check
+  # passes through their Rust crate-graph and that's the layer where
+  # cfg-related breakage lives. On Linux the build script for the
+  # `-sys` crates still runs cmake to configure, which is the slow
+  # part; this job is therefore on the order of "minutes, not tens"
+  # rather than instant.
+  feature-matrix:
+    runs-on: ubuntu-latest
+    needs: [fmt]
+    strategy:
+      fail-fast: false
+      matrix:
+        features: ["nmt", "align", "full"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: crisp-docx
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispEmbed
+          path: CrispEmbed
+          submodules: false
+      - uses: actions/checkout@v4
+        with:
+          repository: CrispStrobe/CrispASR
+          path: CrispASR
+          submodules: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo check -p crisp-translate-cli --features ${{ matrix.features }}
+        working-directory: crisp-docx
+        run: cargo check -p crisp-translate-cli --features ${{ matrix.features }}
+
   build-wheel:
     runs-on: ${{ matrix.os }}
     strategy:

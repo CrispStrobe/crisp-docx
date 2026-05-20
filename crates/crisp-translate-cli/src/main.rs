@@ -67,6 +67,17 @@ struct Cli {
     #[arg(long)]
     dry_run: bool,
 
+    /// Suppress all our own status output. Translation result still
+    /// goes to disk; only the per-paragraph progress lines (and the
+    /// init / chain / summary lines) on stderr are gated.
+    ///
+    /// Note: this doesn't silence chatter from CrispASR / CrispEmbed
+    /// C++ runtimes when those features are on — they print to stderr
+    /// directly. If you need a fully quiet run, pipe `2>/dev/null`
+    /// at the shell level.
+    #[arg(short, long)]
+    quiet: bool,
+
     /// Preserve intra-paragraph run formatting (bold / italic / rStyle)
     /// across the translation by aligning source ↔ target words via a
     /// multilingual encoder. Requires building with `--features align`
@@ -133,12 +144,18 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    macro_rules! info {
+        ($($arg:tt)*) => {
+            if !cli.quiet { eprintln!($($arg)*); }
+        };
+    }
+
     // ── Step 1: open the package and extract paragraphs ───────────────
     let mut pkg = crisp_docx_core::open(&cli.input)
         .with_context(|| format!("opening {}", cli.input.display()))?;
     let paragraphs = crisp_docx_core::extract_paragraph_texts(&pkg)
         .context("extracting paragraphs from word/document.xml")?;
-    eprintln!(
+    info!(
         "extracted {} paragraph(s) from {}",
         paragraphs.len(),
         cli.input.display()
@@ -170,7 +187,7 @@ async fn main() -> Result<()> {
             .add_provider(cfg)
             .context("instantiating provider")?;
     }
-    eprintln!("translator chain: {:?}", translator.provider_names());
+    info!("translator chain: {:?}", translator.provider_names());
 
     // ── Step 3: translate ─────────────────────────────────────────────
     let translations = translate_with_concurrency(
@@ -179,6 +196,7 @@ async fn main() -> Result<()> {
         &cli.source_lang,
         &cli.target_lang,
         cli.concurrency,
+        cli.quiet,
     )
     .await?;
 
@@ -188,7 +206,7 @@ async fn main() -> Result<()> {
             succeeded += 1;
         }
     }
-    eprintln!(
+    info!(
         "{}/{} paragraph(s) translated successfully",
         succeeded,
         translations.len()
@@ -219,7 +237,7 @@ async fn main() -> Result<()> {
         .context("write-back with format preservation")?;
         crisp_docx_core::save(&pkg, &cli.output)
             .with_context(|| format!("saving to {}", cli.output.display()))?;
-        eprintln!("wrote {}", cli.output.display());
+        info!("wrote {}", cli.output.display());
         return Ok(());
     }
 
@@ -234,7 +252,7 @@ async fn main() -> Result<()> {
         .context("rewriting paragraph texts")?;
     crisp_docx_core::save(&pkg, &cli.output)
         .with_context(|| format!("saving to {}", cli.output.display()))?;
-    eprintln!("wrote {}", cli.output.display());
+    info!("wrote {}", cli.output.display());
 
     Ok(())
 }
@@ -362,9 +380,11 @@ async fn translate_with_concurrency(
     src: &str,
     tgt: &str,
     concurrency: usize,
+    quiet: bool,
 ) -> Result<Vec<Result<String, crisp_docx_llm::Error>>> {
     use futures::stream::{self, StreamExt};
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Instant;
 
     // `buffered(N)` preserves input order — head-of-line blocking is
     // fine here because all paragraphs take similar time. Using
@@ -374,14 +394,26 @@ async fn translate_with_concurrency(
     // the document.
     let done = AtomicUsize::new(0);
     let total = texts.len();
+    let started = Instant::now();
     let outs: Vec<_> = stream::iter(texts.iter())
         .map(|t| {
             let done = &done;
             async move {
                 let r = translator.translate_text(t, src, tgt).await;
                 let n = done.fetch_add(1, Ordering::Relaxed) + 1;
-                if n % 10 == 0 || n == total {
-                    eprintln!("  …{n}/{total}");
+                if !quiet && (n % 5 == 0 || n == total) {
+                    let elapsed = started.elapsed().as_secs_f64().max(1e-3);
+                    let rate_per_s = n as f64 / elapsed;
+                    let rate_per_min = rate_per_s * 60.0;
+                    let remaining = total.saturating_sub(n);
+                    let eta = if rate_per_s > 1e-3 {
+                        (remaining as f64 / rate_per_s) as u64
+                    } else {
+                        0
+                    };
+                    eprintln!(
+                        "  …{n}/{total}  {rate_per_min:.1} par/min  ETA {eta}s",
+                    );
                 }
                 r
             }
