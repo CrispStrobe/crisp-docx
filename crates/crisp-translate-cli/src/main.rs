@@ -364,23 +364,31 @@ async fn translate_with_concurrency(
     concurrency: usize,
 ) -> Result<Vec<Result<String, crisp_docx_llm::Error>>> {
     use futures::stream::{self, StreamExt};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
-    let outs: Vec<_> = stream::iter(texts.iter().enumerate())
-        .map(|(i, t)| async move {
-            let r = translator.translate_text(t, src, tgt).await;
-            if i % 10 == 0 {
-                eprintln!("  …{i}/{}", texts.len());
+    // `buffered(N)` preserves input order — head-of-line blocking is
+    // fine here because all paragraphs take similar time. Using
+    // `buffer_unordered` here is a **bug**: the output vec ends up in
+    // completion order rather than paragraph order, and the caller
+    // zips it against the original paragraphs by index, scrambling
+    // the document.
+    let done = AtomicUsize::new(0);
+    let total = texts.len();
+    let outs: Vec<_> = stream::iter(texts.iter())
+        .map(|t| {
+            let done = &done;
+            async move {
+                let r = translator.translate_text(t, src, tgt).await;
+                let n = done.fetch_add(1, Ordering::Relaxed) + 1;
+                if n % 10 == 0 || n == total {
+                    eprintln!("  …{n}/{total}");
+                }
+                r
             }
-            r
         })
-        .buffer_unordered(concurrency.max(1))
+        .buffered(concurrency.max(1))
         .collect()
         .await;
-
-    // `buffer_unordered` doesn't preserve order — re-zip with input index.
-    // For now translate sequentially-by-index when concurrency > 1 we use
-    // a different path. Simpler: do a serial-with-buffer using ordered
-    // collect via buffered() which DOES preserve order.
     Ok(outs)
 }
 
