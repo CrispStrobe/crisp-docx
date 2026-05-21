@@ -121,6 +121,16 @@ jobs:
   feature-matrix:
     runs-on: ubuntu-latest
     needs: [fmt]
+    # Unlike the rest of CI, this job actually turns on the C++-backed
+    # features, so it needs the ggml submodule under CrispEmbed/CrispASR
+    # AND it cannot run under -Dwarnings: those sibling crates are path
+    # dependencies (not registry crates), so cargo does not auto-apply
+    # --cap-lints=warn to them, and upstream's own #[deprecated] items
+    # (e.g. `CrispASR` self-deprecation inside the crispasr lib) turn
+    # into hard errors that we have no way to fix from this repo. Lint
+    # cleanliness for our code is already enforced by the clippy job.
+    env:
+      RUSTFLAGS: ""
     strategy:
       fail-fast: false
       matrix:
@@ -133,12 +143,12 @@ jobs:
         with:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
-          submodules: false
+          submodules: recursive
       - uses: actions/checkout@v4
         with:
           repository: CrispStrobe/CrispASR
           path: CrispASR
-          submodules: false
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
       - name: cargo check -p crisp-translate-cli --features ${{ matrix.features }}
         working-directory: crisp-docx
