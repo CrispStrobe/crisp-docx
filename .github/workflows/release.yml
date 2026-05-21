@@ -1,18 +1,20 @@
 name: release
 
-# Tag-triggered. Pushing `vX.Y.Z` builds:
-#   - `crisp-docx` (core CLI, pure Rust) for linux/macos/windows × x64,
-#     plus macos arm64.
-#   - `crisp-translate --features full` (align+nmt, drags in CrispEmbed +
-#     CrispASR C++ runtimes) for linux x64 and macos arm64. Windows is
-#     deliberately skipped — the C++ build is fragile there and we
-#     don't have a tested toolchain.
-#   - Python wheels for the same matrix the CI `build-wheel` job uses.
+# Tag-triggered (`v*`) OR manually dispatchable with an existing tag.
+# Restructured 2026-05-21 so artifacts appear on the GitHub Release
+# as each build finishes, instead of all-or-nothing at the end:
 #
-# All artifacts are attached to a GitHub Release named after the tag.
-# Release notes are extracted from the matching CHANGELOG section
-# (e.g. tag `v0.1.0` → `## [0.1.0]` block); falls back to a stub if the
-# section is missing.
+#   1. `init-release` creates the (empty) release once. Idempotent —
+#      a re-run on an existing release leaves it alone.
+#   2. Three parallel matrix jobs build artifacts and each call
+#      `gh release upload --clobber` on completion. As soon as a job
+#      finishes its asset shows up in the release.
+#   3. `finalize-release` (if: always()) recomputes SHA256SUMS from
+#      whatever assets actually landed and uploads it.
+#
+# The `macos-13` (x86_64-apple-darwin) runner has been intermittently
+# unavailable; that one job is `continue-on-error: true` with a
+# timeout so it can't block the release.
 
 on:
   push:
@@ -20,7 +22,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v0.1.0). Must already exist.'
+        description: 'Tag to release (must already exist).'
         required: true
 
 permissions:
@@ -28,41 +30,70 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
-  # Deliberately NOT -Dwarnings — see feature-matrix in ci.yml for the
-  # reasoning. Lint enforcement is the CI job's responsibility; release
-  # is about producing artifacts.
+  # NOT -Dwarnings — see ci.yml feature-matrix comment.
 
 jobs:
+  init-release:
+    name: Create GitHub Release (idempotent)
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: resolve
+        name: Resolve tag name
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          TAG="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag: $TAG"
+      - name: Extract changelog section
+        env:
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          VER="${TAG#v}"
+          awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { p=1; print; next }
+            p && /^## \[/ { exit }
+            p { print }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "Release ${TAG}. See CHANGELOG.md for details." > release_notes.md
+          fi
+          cat release_notes.md
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — leaving as-is."
+          else
+            gh release create "$TAG" --title "$TAG" --notes-file release_notes.md
+          fi
+
   build-docx-cli:
     name: crisp-docx (${{ matrix.target }})
+    needs: init-release
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    continue-on-error: ${{ matrix.optional }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            ext: ''
-            archive: tar.gz
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            ext: ''
-            archive: tar.gz
-          - os: macos-13
-            target: x86_64-apple-darwin
-            ext: ''
-            archive: tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            ext: '.exe'
-            archive: zip
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu, ext: '',     archive: tar.gz, optional: false }
+          - { os: macos-latest,   target: aarch64-apple-darwin,     ext: '',     archive: tar.gz, optional: false }
+          # macOS x86_64 runners are scarce; let the release ship without it.
+          - { os: macos-13,       target: x86_64-apple-darwin,      ext: '',     archive: tar.gz, optional: true  }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,   ext: '.exe', archive: zip,    optional: false }
     steps:
       - uses: actions/checkout@v5
         with:
           path: crisp-docx
-      # Sibling checkouts so cargo metadata resolves the workspace's
-      # path deps. Not building those crates here — `-p crisp-docx-cli`
-      # only touches the core CLI, which has no C++ deps.
+      # Sibling-repo checkouts: needed for workspace path-dep metadata.
+      # `-p crisp-docx-cli` doesn't actually link CrispEmbed/CrispASR.
       - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispEmbed
@@ -83,7 +114,7 @@ jobs:
         shell: bash
         working-directory: crisp-docx
         run: |
-          STEM="crisp-docx-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          STEM="crisp-docx-${{ needs.init-release.outputs.tag }}-${{ matrix.target }}"
           mkdir -p staging
           cp "target/${{ matrix.target }}/release/crisp-docx${{ matrix.ext }}" staging/
           cp README.md LICENSE staging/
@@ -92,25 +123,32 @@ jobs:
           else
             tar -czf "${STEM}.tar.gz" -C staging .
           fi
-      - uses: actions/upload-artifact@v4
-        with:
-          name: crisp-docx-${{ matrix.target }}
-          path: |
-            crisp-docx/crisp-docx-*.tar.gz
-            crisp-docx/crisp-docx-*.zip
-          if-no-files-found: error
+          ls -la "${STEM}".*
+      - name: Upload to GitHub Release
+        shell: bash
+        working-directory: crisp-docx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.init-release.outputs.tag }}
+        run: |
+          # Glob may match a tar.gz or zip depending on matrix.archive;
+          # either way exactly one file matches per job.
+          for f in crisp-docx-*."${{ matrix.archive }}"; do
+            gh release upload "$TAG" "$f" --clobber
+          done
 
   build-translate-full:
     name: crisp-translate --features full (${{ matrix.target }})
+    needs: init-release
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    continue-on-error: ${{ matrix.optional }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: aarch64-apple-darwin
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu, optional: false }
+          - { os: macos-latest,  target: aarch64-apple-darwin,    optional: false }
     steps:
       - uses: actions/checkout@v5
         with:
@@ -135,20 +173,25 @@ jobs:
         shell: bash
         working-directory: crisp-docx
         run: |
-          STEM="crisp-translate-full-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          STEM="crisp-translate-full-${{ needs.init-release.outputs.tag }}-${{ matrix.target }}"
           mkdir -p staging
           cp "target/${{ matrix.target }}/release/crisp-translate" staging/
           cp README.md LICENSE staging/
           tar -czf "${STEM}.tar.gz" -C staging .
-      - uses: actions/upload-artifact@v4
-        with:
-          name: crisp-translate-full-${{ matrix.target }}
-          path: crisp-docx/crisp-translate-full-*.tar.gz
-          if-no-files-found: error
+          ls -la "${STEM}".*
+      - name: Upload to GitHub Release
+        shell: bash
+        working-directory: crisp-docx
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.init-release.outputs.tag }}
+        run: gh release upload "$TAG" crisp-translate-full-*.tar.gz --clobber
 
   build-wheels:
     name: wheel (${{ matrix.os }}, py${{ matrix.python-version }})
+    needs: init-release
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -177,49 +220,35 @@ jobs:
       - name: Build wheel
         working-directory: crisp-docx/crates/crisp-docx-py
         run: maturin build --release --out dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
-          path: crisp-docx/crates/crisp-docx-py/dist/*.whl
-          if-no-files-found: error
-
-  publish-release:
-    name: Publish GitHub Release
-    needs: [build-docx-cli, build-translate-full, build-wheels]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      - name: Collect assets + checksums
-        run: |
-          mkdir -p release
-          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.whl' \) -exec cp {} release/ \;
-          (cd release && sha256sum * > sha256sums.txt)
-          ls -la release/
-      - name: Extract changelog section
-        run: |
-          TAG="${TAG_NAME:-$GITHUB_REF_NAME}"
-          VER="${TAG#v}"
-          awk -v ver="$VER" '
-            $0 ~ "^## \\[" ver "\\]" { p=1; print; next }
-            p && /^## \[/ { exit }
-            p { print }
-          ' CHANGELOG.md > release_notes.md
-          if [ ! -s release_notes.md ]; then
-            echo "Release ${TAG}. See CHANGELOG.md for details." > release_notes.md
-          fi
-          cat release_notes.md
-        env:
-          TAG_NAME: ${{ inputs.tag }}
-      - name: Create GitHub Release
+      - name: Upload to GitHub Release
+        shell: bash
+        working-directory: crisp-docx/crates/crisp-docx-py
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG_NAME: ${{ inputs.tag }}
+          TAG: ${{ needs.init-release.outputs.tag }}
         run: |
-          TAG="${TAG_NAME:-$GITHUB_REF_NAME}"
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --notes-file release_notes.md \
-            release/*
+          for w in dist/*.whl; do
+            gh release upload "$TAG" "$w" --clobber
+          done
+
+  finalize-release:
+    name: Refresh SHA256SUMS
+    needs: [init-release, build-docx-cli, build-translate-full, build-wheels]
+    if: always() && needs.init-release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets + sha256sum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.init-release.outputs.tag }}
+        run: |
+          mkdir assets && cd assets
+          # Download every asset currently on the release. The old
+          # sha256sums.txt (if any) is included; we exclude it from
+          # the input list and overwrite at the end via --clobber.
+          gh release download "$TAG" --dir .
+          ls -la
+          find . -maxdepth 1 -type f ! -name 'sha256sums.txt' -print0 \
+            | xargs -0 sha256sum > sha256sums.txt
+          cat sha256sums.txt
+          gh release upload "$TAG" sha256sums.txt --clobber
