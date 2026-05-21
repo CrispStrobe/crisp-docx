@@ -31,15 +31,15 @@ jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: crisp-docx
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
           submodules: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispASR
           path: CrispASR
@@ -53,15 +53,15 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: crisp-docx
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
           submodules: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispASR
           path: CrispASR
@@ -69,7 +69,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - name: clippy core + cli (no align feature — CrispEmbed C++ runtime not compiled)
@@ -88,15 +88,15 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: crisp-docx
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
           submodules: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispASR
           path: CrispASR
@@ -136,15 +136,15 @@ jobs:
       matrix:
         features: ["nmt", "align", "full"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: crisp-docx
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
           submodules: recursive
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispASR
           path: CrispASR
@@ -162,21 +162,21 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: crisp-docx
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispEmbed
           path: CrispEmbed
           submodules: false
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: CrispStrobe/CrispASR
           path: CrispASR
           submodules: false
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install maturin
