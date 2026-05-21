@@ -1,0 +1,225 @@
+name: release
+
+# Tag-triggered. Pushing `vX.Y.Z` builds:
+#   - `crisp-docx` (core CLI, pure Rust) for linux/macos/windows × x64,
+#     plus macos arm64.
+#   - `crisp-translate --features full` (align+nmt, drags in CrispEmbed +
+#     CrispASR C++ runtimes) for linux x64 and macos arm64. Windows is
+#     deliberately skipped — the C++ build is fragile there and we
+#     don't have a tested toolchain.
+#   - Python wheels for the same matrix the CI `build-wheel` job uses.
+#
+# All artifacts are attached to a GitHub Release named after the tag.
+# Release notes are extracted from the matching CHANGELOG section
+# (e.g. tag `v0.1.0` → `## [0.1.0]` block); falls back to a stub if the
+# section is missing.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release (e.g. v0.1.0). Must already exist.'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Deliberately NOT -Dwarnings — see feature-matrix in ci.yml for the
+  # reasoning. Lint enforcement is the CI job's responsibility; release
+  # is about producing artifacts.
+
+jobs:
+  build-docx-cli:
+    name: crisp-docx (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: ''
+            archive: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: ''
+            archive: tar.gz
+          - os: macos-13
+            target: x86_64-apple-darwin
+            ext: ''
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: '.exe'
+            archive: zip
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: crisp-docx
+      # Sibling checkouts so cargo metadata resolves the workspace's
+      # path deps. Not building those crates here — `-p crisp-docx-cli`
+      # only touches the core CLI, which has no C++ deps.
+      - uses: actions/checkout@v5
+        with:
+          repository: CrispStrobe/CrispEmbed
+          path: CrispEmbed
+          submodules: false
+      - uses: actions/checkout@v5
+        with:
+          repository: CrispStrobe/CrispASR
+          path: CrispASR
+          submodules: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: cargo build --release -p crisp-docx-cli
+        working-directory: crisp-docx
+        run: cargo build --release --target ${{ matrix.target }} -p crisp-docx-cli
+      - name: Stage + archive
+        shell: bash
+        working-directory: crisp-docx
+        run: |
+          STEM="crisp-docx-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p staging
+          cp "target/${{ matrix.target }}/release/crisp-docx${{ matrix.ext }}" staging/
+          cp README.md LICENSE staging/
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            (cd staging && 7z a "../${STEM}.zip" .)
+          else
+            tar -czf "${STEM}.tar.gz" -C staging .
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crisp-docx-${{ matrix.target }}
+          path: |
+            crisp-docx/crisp-docx-*.tar.gz
+            crisp-docx/crisp-docx-*.zip
+          if-no-files-found: error
+
+  build-translate-full:
+    name: crisp-translate --features full (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: crisp-docx
+      - uses: actions/checkout@v5
+        with:
+          repository: CrispStrobe/CrispEmbed
+          path: CrispEmbed
+          submodules: recursive
+      - uses: actions/checkout@v5
+        with:
+          repository: CrispStrobe/CrispASR
+          path: CrispASR
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: cargo build --release --features full
+        working-directory: crisp-docx
+        run: cargo build --release --target ${{ matrix.target }} -p crisp-translate-cli --features full
+      - name: Stage + archive
+        shell: bash
+        working-directory: crisp-docx
+        run: |
+          STEM="crisp-translate-full-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          mkdir -p staging
+          cp "target/${{ matrix.target }}/release/crisp-translate" staging/
+          cp README.md LICENSE staging/
+          tar -czf "${STEM}.tar.gz" -C staging .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crisp-translate-full-${{ matrix.target }}
+          path: crisp-docx/crisp-translate-full-*.tar.gz
+          if-no-files-found: error
+
+  build-wheels:
+    name: wheel (${{ matrix.os }}, py${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ['3.10', '3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: crisp-docx
+      - uses: actions/checkout@v5
+        with:
+          repository: CrispStrobe/CrispEmbed
+          path: CrispEmbed
+          submodules: false
+      - uses: actions/checkout@v5
+        with:
+          repository: CrispStrobe/CrispASR
+          path: CrispASR
+          submodules: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install maturin
+        run: pip install maturin
+      - name: Build wheel
+        working-directory: crisp-docx/crates/crisp-docx-py
+        run: maturin build --release --out dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: crisp-docx/crates/crisp-docx-py/dist/*.whl
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-docx-cli, build-translate-full, build-wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect assets + checksums
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.whl' \) -exec cp {} release/ \;
+          (cd release && sha256sum * > sha256sums.txt)
+          ls -la release/
+      - name: Extract changelog section
+        run: |
+          TAG="${TAG_NAME:-$GITHUB_REF_NAME}"
+          VER="${TAG#v}"
+          awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { p=1; print; next }
+            p && /^## \[/ { exit }
+            p { print }
+          ' CHANGELOG.md > release_notes.md
+          if [ ! -s release_notes.md ]; then
+            echo "Release ${TAG}. See CHANGELOG.md for details." > release_notes.md
+          fi
+          cat release_notes.md
+        env:
+          TAG_NAME: ${{ inputs.tag }}
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ inputs.tag }}
+        run: |
+          TAG="${TAG_NAME:-$GITHUB_REF_NAME}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release_notes.md \
+            release/*
