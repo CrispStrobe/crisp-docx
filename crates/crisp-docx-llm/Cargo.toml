@@ -37,7 +37,12 @@ tracing     = { workspace = true }
 # CrispASR offline NMT backend (m2m100 / wmt21 / …). Path dep is a
 # sibling checkout — the same pattern crisp-docx-align uses for
 # CrispEmbed. Loaded only when the `nmt` feature is enabled.
-crispasr = { path = "../../../CrispASR/crispasr", version = "0.5", optional = true }
+#
+# No `version =` pin: CrispASR is a developer-local sibling checkout, not a
+# crates.io release (this crate is `publish = false`), so a semver range here
+# would only break resolution each time CrispASR bumps (it has since moved
+# 0.5 → 0.8). The path alone is the contract.
+crispasr = { path = "../../../CrispASR/crispasr", optional = true }
 
 [dev-dependencies]
 tokio    = { workspace = true, features = ["macros", "rt-multi-thread"] }

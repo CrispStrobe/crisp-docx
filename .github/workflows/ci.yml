@@ -47,8 +47,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
+      # NB: `cargo fmt --all` also descends into local path-dependencies,
+      # i.e. the sibling CrispEmbed / CrispASR checkouts — and trips on
+      # *their* formatting. Scope the check to this repo's own packages.
       - working-directory: crisp-docx
-        run: cargo fmt --all --check
+        run: >
+          cargo fmt --check
+          -p crisp-docx-core
+          -p crisp-docx-cli
+          -p crisp-docx-py
+          -p crisp-docx-align
+          -p crisp-docx-llm
+          -p crisp-translate-cli
 
   clippy:
     runs-on: ubuntu-latest

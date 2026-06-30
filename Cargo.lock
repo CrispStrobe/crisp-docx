@@ -291,20 +291,21 @@ dependencies = [
 
 [[package]]
 name = "crispasr"
-version = "0.5.6"
+version = "0.8.6"
 dependencies = [
  "crispasr-sys",
 ]
 
 [[package]]
 name = "crispasr-sys"
-version = "0.5.7"
+version = "0.8.6"
 
 [[package]]
 name = "crispembed"
 version = "0.4.0"
 dependencies = [
  "crispembed-sys",
+ "libc",
 ]
 
 [[package]]
