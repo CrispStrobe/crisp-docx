@@ -36,6 +36,7 @@ mod note_injection;
 mod notes_kind;
 mod paragraph_runs;
 mod paragraph_text;
+mod quote_style;
 mod rsid_strip;
 mod strip_paragraph_bold;
 mod style_classify;
@@ -57,6 +58,9 @@ pub use paragraph_runs::{
     ParagraphInfo, Run,
 };
 pub use paragraph_text::{extract_paragraph_texts, replace_paragraph_texts};
+pub use quote_style::{
+    normalize_quotes, normalize_quotes_in_package, QuoteOptions, QuoteReport, QuoteStyle,
+};
 pub use rsid_strip::strip_rsids;
 pub use strip_paragraph_bold::strip_paragraph_bold;
 pub use style_classify::{classify_style, SemanticClass, StyleClassification};

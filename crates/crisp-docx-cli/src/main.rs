@@ -14,8 +14,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use crisp_docx_core::{
     analyze_blueprint, apply_heading_inferences, check_package, convert_notes_kind,
-    infer_heading_levels, inject_footnotes, normalize_tags, open, save, strip_paragraph_bold,
-    strip_rsids, transplant_body, NotesKind, StyleIndex,
+    infer_heading_levels, inject_footnotes, normalize_quotes_in_package, normalize_tags, open,
+    save, strip_paragraph_bold, strip_rsids, transplant_body, NotesKind, QuoteOptions, QuoteStyle,
+    StyleIndex,
 };
 
 #[derive(Parser)]
@@ -37,6 +38,10 @@ enum Cmd {
 
     /// Convert a docx between footnotes and endnotes.
     NotesKind(NotesKindArgs),
+
+    /// Unify all quotation marks to one national style (German / English /
+    /// French / Swiss). Apostrophes are preserved.
+    NormalizeQuotes(NormalizeQuotesArgs),
 
     /// Inject Word footnote references at every inline `[N]` marker.
     InjectFootnotes(InjectArgs),
@@ -86,6 +91,22 @@ struct NotesKindArgs {
     /// Convert to footnotes or endnotes.
     #[arg(long, value_enum)]
     to: NotesKindCli,
+}
+
+#[derive(clap::Args)]
+struct NormalizeQuotesArgs {
+    /// Path to the input .docx file.
+    input: PathBuf,
+    /// Output path. Defaults to editing the input in place.
+    #[arg(short, long)]
+    output: Option<PathBuf>,
+    /// Target quotation style.
+    #[arg(long, value_enum)]
+    style: QuoteStyleCli,
+    /// Leave single quotation marks untouched (apostrophes are kept either
+    /// way). Useful when only the double quotes are inconsistent.
+    #[arg(long)]
+    skip_singles: bool,
 }
 
 #[derive(clap::Args)]
@@ -153,6 +174,29 @@ enum NotesKindCli {
     Endnotes,
 }
 
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum QuoteStyleCli {
+    /// `„…“` / `‚…‘` (Germany / Austria).
+    German,
+    /// `“…”` / `‘…’` (English).
+    English,
+    /// `« … »` / `‹ … ›` with narrow inner spacing (France).
+    French,
+    /// `«…»` / `‹…›` without inner spacing (Switzerland).
+    Swiss,
+}
+
+impl From<QuoteStyleCli> for QuoteStyle {
+    fn from(s: QuoteStyleCli) -> Self {
+        match s {
+            QuoteStyleCli::German => QuoteStyle::German,
+            QuoteStyleCli::English => QuoteStyle::English,
+            QuoteStyleCli::French => QuoteStyle::French,
+            QuoteStyleCli::Swiss => QuoteStyle::Swiss,
+        }
+    }
+}
+
 impl From<NotesKindCli> for NotesKind {
     fn from(k: NotesKindCli) -> Self {
         match k {
@@ -172,6 +216,7 @@ fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Clean(args) => cmd_clean(args),
         Cmd::NotesKind(args) => cmd_notes_kind(args),
+        Cmd::NormalizeQuotes(args) => cmd_normalize_quotes(args),
         Cmd::InjectFootnotes(args) => cmd_inject_footnotes(args),
         Cmd::Transplant(args) => cmd_transplant(args),
         Cmd::StripParagraphBold(args) => cmd_strip_paragraph_bold(args),
@@ -243,6 +288,28 @@ fn cmd_notes_kind(args: NotesKindArgs) -> Result<()> {
     let out = args.output.as_deref().unwrap_or(args.input.as_path());
     save(&pkg, out)?;
     println!("converted notes to {:?} -> {}", args.to, out.display());
+    Ok(())
+}
+
+fn cmd_normalize_quotes(args: NormalizeQuotesArgs) -> Result<()> {
+    let mut pkg = open(&args.input).with_context(|| format!("opening {}", args.input.display()))?;
+    let opts = QuoteOptions {
+        singles: !args.skip_singles,
+    };
+    let report = normalize_quotes_in_package(&mut pkg, args.style.into(), opts)?;
+    let out = args.output.as_deref().unwrap_or(args.input.as_path());
+    save(&pkg, out)?;
+    println!(
+        "normalized {} quote mark(s) to {:?} across {} -> {}",
+        report.changed,
+        args.style,
+        if report.parts.is_empty() {
+            "no parts".to_string()
+        } else {
+            report.parts.join(", ")
+        },
+        out.display(),
+    );
     Ok(())
 }
 
