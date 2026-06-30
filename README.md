@@ -49,7 +49,7 @@ Sister project to:
 | Strip rsid / paraId tracking attrs | `rsid_strip` | Cures Word's "found unreadable content" dialog after transplants. |
 | Normalize Apple `textutil` quirks | `normalize_tags` | `w:sz-cs` → `w:szCs`, etc. |
 | Notes-kind conversion | `notes_kind` | Switch footnotes ↔ endnotes (part, rels, content-types, body refs). |
-| Quotation-mark unifier | `quote_style` | Normalize all quotes to one national style — German `„…“`, English `“…”`, French `« … »`, Swiss `«…»` — across body + notes, preserving apostrophes. |
+| Quotation-mark unifier | `quote_style` | Normalize all quotes to one national style — German `„…“`, English `“…”`, French `« … »`, Swiss `«…»`, inward German guillemets `»…«` — across body + notes, preserving apostrophes. |
 | Footnote-reference injection | `note_injection` | Given inline `[N]` markers, split runs and append `<w:footnote>` entries. Note text is parsed as light inline markdown — `*italic*`, `**bold**`, `[label](url)` and bare URLs become real runs / hyperlinks. |
 | Body transplant | `transplant` | Clone a blueprint package, swap in source paragraphs, preserve sectPr / formatting / footnotes. |
 | Run-level paragraph IO | `paragraph_runs` | Extract each `<w:r>` with verbatim `<w:rPr>` bytes for downstream reformatting. |
@@ -92,7 +92,7 @@ Live-verified end-to-end translation pairs (May 2026):
 cargo install --git https://github.com/CrispStrobe/crisp-docx crisp-docx-cli
 crisp-docx clean broken.docx
 crisp-docx notes-kind paper.docx --to endnotes
-crisp-docx normalize-quotes paper.docx --style german   # or english/french/swiss
+crisp-docx normalize-quotes paper.docx --style german   # english/french/swiss/german-guillemets
 crisp-docx check paper.docx        # 7-axis validity report
 crisp-docx analyze paper.docx      # blueprint metadata
 crisp-docx transplant blueprint.docx source.docx -o out.docx

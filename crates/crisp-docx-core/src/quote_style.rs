@@ -2,9 +2,10 @@
 //!
 //! Word documents assembled from mixed sources (pandoc, copy-paste, Word
 //! autocorrect with the wrong UI language) end up with a salad of quote
-//! glyphs: English `“…”`, German `„…“`, French `«…»`, straight `"…"`. This
-//! module rewrites every quotation mark in the body text to one chosen
-//! [`QuoteStyle`], leaving apostrophes alone.
+//! glyphs: English `“…”`, German `„…“`, French `«…»`, inward German
+//! guillemets `»…«`, straight `"…"`. This module rewrites every quotation
+//! mark in the body text to one chosen [`QuoteStyle`], leaving apostrophes
+//! alone.
 //!
 //! ## How open vs. close is decided
 //!
@@ -51,6 +52,9 @@ pub enum QuoteStyle {
     French,
     /// `«…»` / `‹…›` without inner spacing — Swiss usage (FR & DE).
     Swiss,
+    /// `»…«` / `›…‹` — inward-pointing guillemets without inner spacing,
+    /// the reverse of French. Traditional German book typography.
+    GermanGuillemets,
 }
 
 /// Knobs for [`normalize_quotes`].
@@ -73,34 +77,38 @@ const APOSTROPHE: char = '\u{2019}';
 impl QuoteStyle {
     fn double_open(self) -> &'static str {
         match self {
-            QuoteStyle::German => "\u{201E}",         // „
-            QuoteStyle::English => "\u{201C}",        // “
-            QuoteStyle::French => "\u{00AB}\u{202F}", // «␠
-            QuoteStyle::Swiss => "\u{00AB}",          // «
+            QuoteStyle::German => "\u{201E}",           // „
+            QuoteStyle::English => "\u{201C}",          // “
+            QuoteStyle::French => "\u{00AB}\u{202F}",   // «␠
+            QuoteStyle::Swiss => "\u{00AB}",            // «
+            QuoteStyle::GermanGuillemets => "\u{00BB}", // »
         }
     }
     fn double_close(self) -> &'static str {
         match self {
-            QuoteStyle::German => "\u{201C}",         // “
-            QuoteStyle::English => "\u{201D}",        // ”
-            QuoteStyle::French => "\u{202F}\u{00BB}", // ␠»
-            QuoteStyle::Swiss => "\u{00BB}",          // »
+            QuoteStyle::German => "\u{201C}",           // “
+            QuoteStyle::English => "\u{201D}",          // ”
+            QuoteStyle::French => "\u{202F}\u{00BB}",   // ␠»
+            QuoteStyle::Swiss => "\u{00BB}",            // »
+            QuoteStyle::GermanGuillemets => "\u{00AB}", // «
         }
     }
     fn single_open(self) -> &'static str {
         match self {
-            QuoteStyle::German => "\u{201A}",         // ‚
-            QuoteStyle::English => "\u{2018}",        // ‘
-            QuoteStyle::French => "\u{2039}\u{202F}", // ‹␠
-            QuoteStyle::Swiss => "\u{2039}",          // ‹
+            QuoteStyle::German => "\u{201A}",           // ‚
+            QuoteStyle::English => "\u{2018}",          // ‘
+            QuoteStyle::French => "\u{2039}\u{202F}",   // ‹␠
+            QuoteStyle::Swiss => "\u{2039}",            // ‹
+            QuoteStyle::GermanGuillemets => "\u{203A}", // ›
         }
     }
     fn single_close(self) -> &'static str {
         match self {
-            QuoteStyle::German => "\u{2018}",         // ‘
-            QuoteStyle::English => "\u{2019}",        // ’
-            QuoteStyle::French => "\u{202F}\u{203A}", // ␠›
-            QuoteStyle::Swiss => "\u{203A}",          // ›
+            QuoteStyle::German => "\u{2018}",           // ‘
+            QuoteStyle::English => "\u{2019}",          // ’
+            QuoteStyle::French => "\u{202F}\u{203A}",   // ␠›
+            QuoteStyle::Swiss => "\u{203A}",            // ›
+            QuoteStyle::GermanGuillemets => "\u{2039}", // ‹
         }
     }
 }
@@ -384,6 +392,27 @@ mod tests {
     fn to_french_adds_inner_narrow_space() {
         let s = normalize_quotes(r#""mot""#, QuoteStyle::French, QuoteOptions::default());
         assert_eq!(s, "\u{00AB}\u{202F}mot\u{202F}\u{00BB}");
+    }
+
+    #[test]
+    fn to_german_guillemets_points_inward() {
+        let s = normalize_quotes(
+            r#""Wort""#,
+            QuoteStyle::GermanGuillemets,
+            QuoteOptions::default(),
+        );
+        assert_eq!(s, "\u{00BB}Wort\u{00AB}");
+    }
+
+    #[test]
+    fn french_to_german_guillemets_flips_and_strips() {
+        // « mot » (outward, spaced) -> »mot« (inward, no spacing)
+        let s = normalize_quotes(
+            "\u{00AB}\u{202F}mot\u{202F}\u{00BB}",
+            QuoteStyle::GermanGuillemets,
+            QuoteOptions::default(),
+        );
+        assert_eq!(s, "\u{00BB}mot\u{00AB}");
     }
 
     #[test]

@@ -184,6 +184,9 @@ enum QuoteStyleCli {
     French,
     /// `«…»` / `‹…›` without inner spacing (Switzerland).
     Swiss,
+    /// `»…«` / `›…‹` — inward German guillemets (book typography).
+    #[value(alias = "inverse", alias = "german-books", alias = "reversed")]
+    GermanGuillemets,
 }
 
 impl From<QuoteStyleCli> for QuoteStyle {
@@ -193,6 +196,7 @@ impl From<QuoteStyleCli> for QuoteStyle {
             QuoteStyleCli::English => QuoteStyle::English,
             QuoteStyleCli::French => QuoteStyle::French,
             QuoteStyleCli::Swiss => QuoteStyle::Swiss,
+            QuoteStyleCli::GermanGuillemets => QuoteStyle::GermanGuillemets,
         }
     }
 }
