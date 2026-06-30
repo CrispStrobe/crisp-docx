@@ -28,6 +28,8 @@ pub const PART_FOOTNOTES: &str = "word/footnotes.xml";
 pub const PART_ENDNOTES: &str = "word/endnotes.xml";
 /// Standard part path: the document's rels file.
 pub const PART_DOCUMENT_RELS: &str = "word/_rels/document.xml.rels";
+/// Standard part path: the footnotes part's rels file (hyperlink targets).
+pub const PART_FOOTNOTES_RELS: &str = "word/_rels/footnotes.xml.rels";
 /// Standard part path: the OPC content types listing.
 pub const PART_CONTENT_TYPES: &str = "[Content_Types].xml";
 
@@ -44,3 +46,6 @@ pub const REL_TYPE_FOOTNOTES: &str =
 /// Relationship type for the endnotes part.
 pub const REL_TYPE_ENDNOTES: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes";
+/// Relationship type for a hyperlink (external link target).
+pub const REL_TYPE_HYPERLINK: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink";

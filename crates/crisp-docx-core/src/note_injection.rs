@@ -18,6 +18,14 @@
 //! `word/footnotes.xml` (creating the part plus its content-types
 //! override and `document.xml.rels` entry if they didn't exist).
 //!
+//! ## Note formatting
+//!
+//! Note text is parsed as light inline markdown (see [`crate::inline_md`]):
+//! `*italic*`, `**bold**`, `[label](url)` and bare/angle URLs become real
+//! styled runs and `<w:hyperlink>`s (the latter backed by a generated
+//! `word/_rels/footnotes.xml.rels`), rather than literal asterisks and
+//! brackets.
+//!
 //! ## Scope (MVP)
 //!
 //! This first cut handles the common case: each `[N]` marker lives entirely
@@ -39,9 +47,10 @@ use quick_xml::reader::Reader;
 use quick_xml::writer::Writer;
 
 use crate::error::{Error, Result};
+use crate::inline_md::{parse_inline, Span};
 use crate::ns::{
     CT_FOOTNOTES, PART_CONTENT_TYPES, PART_DOCUMENT, PART_DOCUMENT_RELS, PART_FOOTNOTES,
-    REL_TYPE_FOOTNOTES,
+    PART_FOOTNOTES_RELS, REL_TYPE_FOOTNOTES, REL_TYPE_HYPERLINK,
 };
 use crate::package::Package;
 
@@ -356,29 +365,31 @@ fn ensure_footnotes_part(
     seen: &[u32],
 ) -> Result<()> {
     let mut payload: Vec<u8> = Vec::new();
+    // The `r` namespace is needed for any <w:hyperlink r:id="…">; declaring it
+    // unconditionally is harmless when no note links out.
     payload.extend_from_slice(
-        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote w:id="-1" w:type="separator"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:id="0" w:type="continuationSeparator"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>"#,
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:footnote w:id="-1" w:type="separator"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:id="0" w:type="continuationSeparator"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>"#,
     );
+    // Hyperlink targets discovered while emitting note bodies, in rId order.
+    let mut hyperlinks: Vec<String> = Vec::new();
     for n in seen {
         if let Some(body) = notes.get(n) {
             payload.extend_from_slice(format!("<w:footnote w:id=\"{n}\">").as_bytes());
             payload.extend_from_slice(
-                br#"<w:p><w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> </w:t></w:r><w:r><w:t xml:space="preserve">"#,
+                br#"<w:p><w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> </w:t></w:r>"#,
             );
-            // Escape the user text minimally for XML.
-            for byte in body.bytes() {
-                match byte {
-                    b'<' => payload.extend_from_slice(b"&lt;"),
-                    b'>' => payload.extend_from_slice(b"&gt;"),
-                    b'&' => payload.extend_from_slice(b"&amp;"),
-                    _ => payload.push(byte),
-                }
+            for span in parse_inline(body) {
+                write_span(&mut payload, &span, &mut hyperlinks);
             }
-            payload.extend_from_slice(b"</w:t></w:r></w:p></w:footnote>");
+            payload.extend_from_slice(b"</w:p></w:footnote>");
         }
     }
     payload.extend_from_slice(b"</w:footnotes>");
     pkg.set_part(PART_FOOTNOTES, payload);
+
+    if !hyperlinks.is_empty() {
+        ensure_footnotes_rels(pkg, &hyperlinks);
+    }
 
     // Patch [Content_Types].xml if we're creating the part.
     if let Some(ct_bytes) = pkg.get_part_mut(PART_CONTENT_TYPES) {
@@ -424,6 +435,84 @@ fn ensure_footnotes_part(
         }
     }
     Ok(())
+}
+
+/// Append one [`Span`] to a footnote body as a `<w:r>` (wrapped in a
+/// `<w:hyperlink>` when it links out). New link targets are pushed onto
+/// `hyperlinks`; their 1-based index becomes the `rId`.
+fn write_span(payload: &mut Vec<u8>, span: &Span, hyperlinks: &mut Vec<String>) {
+    let rid = span.link.as_ref().map(|url| {
+        hyperlinks.push(url.clone());
+        hyperlinks.len() // rId1, rId2, …
+    });
+    if let Some(id) = rid {
+        payload.extend_from_slice(format!(r#"<w:hyperlink r:id="rId{id}">"#).as_bytes());
+    }
+    payload.extend_from_slice(b"<w:r>");
+    if span.link.is_some() || span.bold || span.italic {
+        payload.extend_from_slice(b"<w:rPr>");
+        if span.link.is_some() {
+            payload.extend_from_slice(br#"<w:rStyle w:val="Hyperlink"/>"#);
+        }
+        if span.bold {
+            payload.extend_from_slice(b"<w:b/><w:bCs/>");
+        }
+        if span.italic {
+            payload.extend_from_slice(b"<w:i/><w:iCs/>");
+        }
+        payload.extend_from_slice(b"</w:rPr>");
+    }
+    payload.extend_from_slice(br#"<w:t xml:space="preserve">"#);
+    xml_escape_into(payload, &span.text);
+    payload.extend_from_slice(b"</w:t></w:r>");
+    if rid.is_some() {
+        payload.extend_from_slice(b"</w:hyperlink>");
+    }
+}
+
+/// Write `word/_rels/footnotes.xml.rels` with one external hyperlink
+/// relationship per entry (`rId1`, `rId2`, …, matching [`write_span`]).
+fn ensure_footnotes_rels(pkg: &mut Package, hyperlinks: &[String]) {
+    let mut rels: Vec<u8> = Vec::new();
+    rels.extend_from_slice(
+        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">"#,
+    );
+    for (i, url) in hyperlinks.iter().enumerate() {
+        let id = i + 1;
+        rels.extend_from_slice(
+            format!(r#"<Relationship Id="rId{id}" Type="{REL_TYPE_HYPERLINK}" Target=""#)
+                .as_bytes(),
+        );
+        xml_escape_attr_into(&mut rels, url);
+        rels.extend_from_slice(br#"" TargetMode="External"/>"#);
+    }
+    rels.extend_from_slice(b"</Relationships>");
+    pkg.set_part(PART_FOOTNOTES_RELS, rels);
+}
+
+/// Minimal XML text escaping (`& < >`).
+fn xml_escape_into(out: &mut Vec<u8>, text: &str) {
+    for byte in text.bytes() {
+        match byte {
+            b'<' => out.extend_from_slice(b"&lt;"),
+            b'>' => out.extend_from_slice(b"&gt;"),
+            b'&' => out.extend_from_slice(b"&amp;"),
+            _ => out.push(byte),
+        }
+    }
+}
+
+/// XML attribute escaping (text plus `"`), used for hyperlink targets.
+fn xml_escape_attr_into(out: &mut Vec<u8>, text: &str) {
+    for byte in text.bytes() {
+        match byte {
+            b'<' => out.extend_from_slice(b"&lt;"),
+            b'>' => out.extend_from_slice(b"&gt;"),
+            b'&' => out.extend_from_slice(b"&amp;"),
+            b'"' => out.extend_from_slice(b"&quot;"),
+            _ => out.push(byte),
+        }
+    }
 }
 
 fn memchr_contains(hay: &[u8], needle: &[u8]) -> bool {

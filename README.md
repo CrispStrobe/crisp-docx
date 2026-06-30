@@ -49,7 +49,7 @@ Sister project to:
 | Strip rsid / paraId tracking attrs | `rsid_strip` | Cures Word's "found unreadable content" dialog after transplants. |
 | Normalize Apple `textutil` quirks | `normalize_tags` | `w:sz-cs` → `w:szCs`, etc. |
 | Notes-kind conversion | `notes_kind` | Switch footnotes ↔ endnotes (part, rels, content-types, body refs). |
-| Footnote-reference injection | `note_injection` | Given inline `[N]` markers, split runs and append `<w:footnote>` entries. |
+| Footnote-reference injection | `note_injection` | Given inline `[N]` markers, split runs and append `<w:footnote>` entries. Note text is parsed as light inline markdown — `*italic*`, `**bold**`, `[label](url)` and bare URLs become real runs / hyperlinks. |
 | Body transplant | `transplant` | Clone a blueprint package, swap in source paragraphs, preserve sectPr / formatting / footnotes. |
 | Run-level paragraph IO | `paragraph_runs` | Extract each `<w:r>` with verbatim `<w:rPr>` bytes for downstream reformatting. |
 | Text-only paragraph IO | `paragraph_text` | Light flavour for plain-text round-trips (collapses runs into one). |
@@ -94,7 +94,27 @@ crisp-docx notes-kind paper.docx --to endnotes
 crisp-docx check paper.docx        # 7-axis validity report
 crisp-docx analyze paper.docx      # blueprint metadata
 crisp-docx transplant blueprint.docx source.docx -o out.docx
+
+# Turn inline [N] markers into real footnotes from a {"N": "text"} map.
+# Note text may use light markdown (*italic*, **bold**, [label](url)).
+crisp-docx inject-footnotes paper.docx --notes notes.json -o out.docx
 ```
+
+### Markdown → docx with real footnotes
+
+Source markdown that cites footnotes as bare `[N]` markers plus a trailing
+`[N] text` block (instead of pandoc's `[^N]` / `[^N]:` syntax) won't footnote
+correctly through pandoc alone. `scripts/md-footnotes-to-docx.py` rewrites that
+convention into pandoc footnote syntax and runs pandoc, producing page-bottom
+Word **footnotes** (not endnotes) with note formatting preserved:
+
+```bash
+scripts/md-footnotes-to-docx.py paper.md -o paper.docx
+scripts/md-footnotes-to-docx.py paper.md --reference-doc house-style.docx
+```
+
+Requires `pandoc` on `PATH`. Only purely-numeric `[N]` markers with a matching
+definition are converted; markers like `[S2]` or `[Author]` are left alone.
 
 ### Document translation (cloud LLM)
 

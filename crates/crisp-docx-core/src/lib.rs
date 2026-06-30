@@ -30,6 +30,7 @@ mod check;
 mod clean_runs;
 mod footnote_format;
 mod heading_inference;
+mod inline_md;
 mod normalize_tags;
 mod note_injection;
 mod notes_kind;

@@ -10,6 +10,8 @@ depending on whether the Provider trait change counts as breaking
 for any downstream.
 
 ### Added
+- **Formatting-aware footnote injection**: `inject_footnotes` now parses note text as light inline markdown (new `crisp-docx-core` module `inline_md`). `*italic*` / `**bold**` become real `<w:i/>` / `<w:b/>` runs, and `[label](url)` / angle / bare URLs become `<w:hyperlink>`s backed by a generated `word/_rels/footnotes.xml.rels` — previously the note body was emitted as one literal `<w:t>`, so the markdown reached Word verbatim. Underscores are left literal by design.
+- `scripts/md-footnotes-to-docx.py` — convert markdown that uses bare `[N]` / `[N] text` footnotes (not pandoc `[^N]`) into a `.docx` with real page-bottom Word footnotes, preserving inline note formatting via pandoc.
 - `LlmTranslator::translate_batch_bounded(texts, src, tgt, concurrency)` — order-preserving bounded fan-out. Use this over `translate_batch` when you care about input/output index alignment (every caller does, in practice).
 - `Language` struct with `name` + `code` fields. Parses from either a human-readable name (`"German"`) or an ISO-639-1 code (`"de"`); unknown inputs pass through. LLM-backed providers consume `.name` in prompts; NMT backends consume `.code` against the model. Replaces the free-form `&str` lang args at the `Provider::translate` trait boundary.
 - `crisp-translate-cli`: split `--features align` into independent `align` (CrispEmbed encoder) + `nmt` (CrispASR offline NMT) + `full` (both). Users can build only what they need.
