@@ -21,14 +21,13 @@ import sys
 import zipfile
 from pathlib import Path
 
-# Make CrispTranslator's source code importable. The harness assumes the
-# repo lives at the canonical path next to this one. Override via env var if
-# the layout differs.
+# Make CrispTranslator's source code importable. Default to a sibling
+# checkout under ~/code; override via CRISP_TRANSLATOR_DIR if the layout
+# differs.
 import os
 CRISP_TRANSLATOR = Path(
-    os.environ.get(
-        "CRISP_TRANSLATOR_DIR",
-        "/Users/christianstrobele/code/CrispTranslator",
+    os.path.expanduser(
+        os.environ.get("CRISP_TRANSLATOR_DIR", "~/code/CrispTranslator")
     )
 )
 sys.path.insert(0, str(CRISP_TRANSLATOR))

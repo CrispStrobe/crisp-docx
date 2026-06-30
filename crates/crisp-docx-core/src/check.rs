@@ -574,11 +574,19 @@ mod tests {
 
     #[test]
     fn check_vielfalt_doc_is_clean() {
-        let path = "/Users/christianstrobele/OneDrive/2026 Vielfalt cs15.docx";
-        if !std::path::Path::new(path).exists() {
+        // Real fixture (not in git): set CRISP_DOCX_PARITY_VIELFALT, or drop
+        // the file at the repo-relative default below. Skips when absent.
+        let path = std::env::var("CRISP_DOCX_PARITY_VIELFALT").unwrap_or_else(|_| {
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/parity_fixtures/vielfalt_cs15.docx"
+            )
+            .to_string()
+        });
+        if !std::path::Path::new(&path).exists() {
             return;
         }
-        let pkg = open(path).unwrap();
+        let pkg = open(&path).unwrap();
         let report = check_package(&pkg).unwrap();
         // post-cleanup doc should be clean
         for issue in &report.issues {

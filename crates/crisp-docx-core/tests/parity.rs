@@ -11,8 +11,8 @@
 //! Environment:
 //!
 //!   CRISP_DOCX_PARITY_VIELFALT
-//!     Path to a real docx fixture (default:
-//!     `/Users/christianstrobele/OneDrive/2026 Vielfalt cs15.docx`).
+//!     Path to a real docx fixture (default, repo-relative:
+//!     `tests/parity_fixtures/vielfalt_cs15.docx`).
 //!
 //!   CRISP_DOCX_PARITY_PY_RUNNER
 //!     Path to the Python interpreter (default: searches for
@@ -24,6 +24,13 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// Default location of the `vielfalt_cs15` fixture, relative to this crate.
+/// The file is not committed; override with `CRISP_DOCX_PARITY_VIELFALT`.
+const DEFAULT_VIELFALT: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/parity_fixtures/vielfalt_cs15.docx"
+);
 
 use crisp_docx_core::{
     check_package, classify_style, clean_runs, convert_notes_kind, normalize_tags, open, save,
@@ -408,10 +415,7 @@ mod compare {
 
 #[test]
 fn parity_strip_rsids() {
-    let Some(fx) = fixture(
-        "CRISP_DOCX_PARITY_VIELFALT",
-        "/Users/christianstrobele/OneDrive/2026 Vielfalt cs15.docx",
-    ) else {
+    let Some(fx) = fixture("CRISP_DOCX_PARITY_VIELFALT", DEFAULT_VIELFALT) else {
         eprintln!("CRISP_DOCX_PARITY_VIELFALT missing — skipping");
         return;
     };
@@ -465,10 +469,7 @@ fn parity_strip_rsids() {
 
 #[test]
 fn parity_normalize_tags() {
-    let Some(fx) = fixture(
-        "CRISP_DOCX_PARITY_VIELFALT",
-        "/Users/christianstrobele/OneDrive/2026 Vielfalt cs15.docx",
-    ) else {
+    let Some(fx) = fixture("CRISP_DOCX_PARITY_VIELFALT", DEFAULT_VIELFALT) else {
         eprintln!("CRISP_DOCX_PARITY_VIELFALT missing — skipping");
         return;
     };
@@ -506,10 +507,7 @@ fn parity_normalize_tags() {
 
 #[test]
 fn parity_notes_to_endnotes() {
-    let Some(fx) = fixture(
-        "CRISP_DOCX_PARITY_VIELFALT",
-        "/Users/christianstrobele/OneDrive/2026 Vielfalt cs15.docx",
-    ) else {
+    let Some(fx) = fixture("CRISP_DOCX_PARITY_VIELFALT", DEFAULT_VIELFALT) else {
         eprintln!("CRISP_DOCX_PARITY_VIELFALT missing — skipping");
         return;
     };
@@ -555,10 +553,7 @@ fn parity_notes_to_endnotes() {
 
 #[test]
 fn parity_clean_runs() {
-    let Some(fx) = fixture(
-        "CRISP_DOCX_PARITY_VIELFALT",
-        "/Users/christianstrobele/OneDrive/2026 Vielfalt cs15.docx",
-    ) else {
+    let Some(fx) = fixture("CRISP_DOCX_PARITY_VIELFALT", DEFAULT_VIELFALT) else {
         eprintln!("CRISP_DOCX_PARITY_VIELFALT missing — skipping");
         return;
     };
@@ -689,10 +684,7 @@ fn parity_classify_style() {
 
 #[test]
 fn parity_check_package() {
-    let Some(fx) = fixture(
-        "CRISP_DOCX_PARITY_VIELFALT",
-        "/Users/christianstrobele/OneDrive/2026 Vielfalt cs15.docx",
-    ) else {
+    let Some(fx) = fixture("CRISP_DOCX_PARITY_VIELFALT", DEFAULT_VIELFALT) else {
         eprintln!("CRISP_DOCX_PARITY_VIELFALT missing — skipping");
         return;
     };
