@@ -33,7 +33,7 @@ thiserror  = { workspace = true }
 # Bring in CrispEmbed via path — the assumption is `CrispEmbed/` is a
 # sibling checkout. Mirrors what we do for the CrispTranslator parity
 # harness: a developer-local dependency, not an over-the-net crate.
-crispembed = { path = "../../../CrispEmbed/crispembed", version = "0.4", optional = true }
+crispembed = { path = "../../../CrispEmbed/crispembed", optional = true }
 
 # No [dev-dependencies] section: the only target that needs crispembed is
 # the `align_smoke` example, which gates itself via `required-features`
