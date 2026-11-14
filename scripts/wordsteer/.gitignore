@@ -1,2 +1,13 @@
 __pycache__/
 *.pyc
+# Corpus documents and run outputs are private and must never be committed.
+# Tests build their packages in memory; no Office file belongs here.
+*.doc
+*.docx
+*.docm
+*.dot
+*.dotx
+*.rtf
+*.odt
+runs/
+results*.jsonl
