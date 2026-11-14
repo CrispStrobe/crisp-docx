@@ -45,12 +45,12 @@
     "list": {
       "write": true,
       "params": {"numbered": "bool", "level": "int"},
-      "engines": ["word", "quds"]
+      "engines": ["word", "quds", "crisp"]
     },
     "listClear": {
       "write": true,
       "params": {},
-      "engines": ["word", "quds"]
+      "engines": ["word", "quds", "crisp"]
     }
   },
   "conversions": {

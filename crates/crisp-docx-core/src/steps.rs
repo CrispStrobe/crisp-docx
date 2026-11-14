@@ -24,6 +24,13 @@ use crate::package::Package;
 use crate::xml_tree::{escape, unescape, Document, Elem, Node};
 
 const PART_STYLES: &str = "word/styles.xml";
+const PART_NUMBERING: &str = "word/numbering.xml";
+const PART_CONTENT_TYPES: &str = "[Content_Types].xml";
+const PART_DOCUMENT_RELS: &str = "word/_rels/document.xml.rels";
+const REL_NUMBERING: &str =
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering";
+const CT_NUMBERING: &str =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml";
 
 /// Where a step applies.
 #[derive(Debug, Clone, PartialEq)]
@@ -125,6 +132,11 @@ pub enum Step {
     ParagraphDelete(Target),
     /// Change page margins / size of one section.
     SectionFormat(SectionFormat),
+    /// Make the target's paragraph a bulleted (`numbered == false`) or
+    /// numbered list item at `level` (0-8), like Word's default galleries.
+    List(Target, bool, u8),
+    /// Remove list formatting from the target's paragraph.
+    ListClear(Target),
 }
 
 /// What each step resolved to: (paragraph index, start, end) or None.
@@ -150,9 +162,10 @@ pub fn apply_steps(pkg: &mut Package, steps: &[Step]) -> Result<StepReport> {
     let mut doc = load(pkg, PART_DOCUMENT)?;
     let cx = Cx::new(&doc);
     let mut styles: Option<Document> = None;
+    let mut lists = Lists::default();
     let mut report = StepReport::default();
     for (i, step) in steps.iter().enumerate() {
-        let r = apply_one(&mut doc, &mut styles, pkg, &cx, step)
+        let r = apply_one(&mut doc, &mut styles, &mut lists, pkg, &cx, step)
             .map_err(|e| Error::Step(format!("step {} ({}): {e}", i + 1, step_name(step))))?;
         report.resolved.push(r);
     }
@@ -160,6 +173,7 @@ pub fn apply_steps(pkg: &mut Package, steps: &[Step]) -> Result<StepReport> {
     if let Some(st) = styles {
         pkg.set_part(PART_STYLES, st.to_bytes());
     }
+    lists.save(pkg)?;
     Ok(report)
 }
 
@@ -172,6 +186,8 @@ fn step_name(s: &Step) -> &'static str {
         Step::ParagraphInsert(..) => "paragraphInsert",
         Step::ParagraphDelete(..) => "paragraphDelete",
         Step::SectionFormat(..) => "sectionFormat",
+        Step::List(..) => "list",
+        Step::ListClear(..) => "listClear",
     }
 }
 
@@ -868,6 +884,7 @@ fn apply_paragraph_format(p: &mut Elem, cx: &Cx, f: &ParagraphFormat) -> Result<
 fn apply_one(
     doc: &mut Document,
     styles: &mut Option<Document>,
+    lists: &mut Lists,
     pkg: &Package,
     cx: &Cx,
     step: &Step,
@@ -882,9 +899,25 @@ fn apply_one(
         | Step::ReplaceText(t, _)
         | Step::Heading(t, _)
         | Step::ParagraphInsert(t, _)
-        | Step::ParagraphDelete(t) => t,
+        | Step::ParagraphDelete(t)
+        | Step::List(t, _, _)
+        | Step::ListClear(t) => t,
         Step::SectionFormat(_) => unreachable!(),
     };
+    let list_num = if let Step::List(_, numbered, level) = step {
+        if *level > 8 {
+            return Err(Error::Step(format!("list level {level} > 8")));
+        }
+        Some(lists.num_id(pkg, *numbered)?)
+    } else {
+        None
+    };
+    if matches!(step, Step::ListClear(_)) && styles.is_none() {
+        *styles = pkg
+            .get_part(PART_STYLES)
+            .map(|b| Document::parse(b, PART_STYLES))
+            .transpose()?;
+    }
     // Heading may need a style id before the body is borrowed mutably.
     let heading_style = if let Step::Heading(_, level) = step {
         if *level > 9 {
@@ -927,6 +960,29 @@ fn apply_one(
         }
         Step::ParagraphInsert(_, text) => insert_after(body, cx, &ppath, text)?,
         Step::ParagraphDelete(_) => delete_paragraph(body, cx, &ppath, &paths)?,
+        Step::List(_, _, level) => {
+            let p = get_mut(body, &ppath);
+            let ppr = props(p, cx, "pPr");
+            set_num_pr(ppr, cx, *level, list_num.expect("resolved above"));
+        }
+        Step::ListClear(_) => {
+            let p = get_mut(body, &ppath);
+            let style_id = p
+                .child(&cx.n("pPr"))
+                .and_then(|x| x.child(&cx.n("pStyle")))
+                .and_then(|x| x.attr(&cx.n("val")))
+                .map(unescape);
+            let ppr = props(p, cx, "pPr");
+            remove_child(ppr, cx, "numPr");
+            // Numbering inherited from the paragraph style is suppressed the
+            // way Word does it: an explicit numId 0.
+            if styles
+                .as_ref()
+                .is_some_and(|st| style_has_numbering(st, style_id.as_deref()))
+            {
+                set_num_pr(ppr, cx, 0, 0);
+            }
+        }
         Step::SectionFormat(_) => unreachable!(),
     }
     Ok(Some((pi, s, e)))
@@ -1030,6 +1086,214 @@ fn reset_like_word_style_apply(p: &mut Elem, cx: &Cx) {
     }
     if let Some(ppr) = p.child_mut(&cx.n("pPr")) {
         ppr.children.retain(|n| !empty_rpr(n));
+    }
+}
+
+fn set_num_pr(ppr: &mut Elem, cx: &Cx, level: u8, num_id: u32) {
+    let num = ordered_child(ppr, cx, "numPr", PPR_ORDER);
+    num.children.clear();
+    num.self_closing = false;
+    let mut ilvl = Elem::new(cx.n("ilvl"));
+    ilvl.set_attr(&cx.n("val"), &level.to_string());
+    let mut id = Elem::new(cx.n("numId"));
+    id.set_attr(&cx.n("val"), &num_id.to_string());
+    num.children.push(Node::Elem(ilvl));
+    num.children.push(Node::Elem(id));
+}
+
+/// Does the paragraph style (or a style it is based on) carry numbering?
+fn style_has_numbering(styles: &Document, style_id: Option<&str>) -> bool {
+    let cx = Cx::new(styles);
+    let mut current = style_id.map(str::to_string).or_else(|| {
+        styles
+            .root
+            .elems()
+            .find(|e| {
+                cx.is(e, "style")
+                    && e.attr(&cx.n("type")) == Some(b"paragraph")
+                    && matches!(e.attr(&cx.n("default")), Some(b"1" | b"true"))
+            })
+            .and_then(|e| e.attr(&cx.n("styleId")).map(unescape))
+    });
+    let mut guard = 0;
+    while let Some(id) = current.take() {
+        guard += 1;
+        if guard > 32 {
+            break;
+        }
+        let Some(style) = styles.root.elems().find(|e| {
+            cx.is(e, "style")
+                && e.attr(&cx.n("styleId")).map(unescape).as_deref() == Some(id.as_str())
+        }) else {
+            break;
+        };
+        if let Some(num) = style
+            .child(&cx.n("pPr"))
+            .and_then(|p| p.child(&cx.n("numPr")))
+        {
+            let id = num.child(&cx.n("numId")).and_then(|n| n.attr(&cx.n("val")));
+            return id != Some(b"0");
+        }
+        current = style
+            .child(&cx.n("basedOn"))
+            .and_then(|b| b.attr(&cx.n("val")))
+            .map(unescape);
+    }
+    false
+}
+
+/// numbering.xml handling for `list`: created on demand, one bullet and one
+/// decimal definition per apply_steps call (reused by every list step).
+#[derive(Default)]
+struct Lists {
+    numbering: Option<Document>,
+    created: bool,
+    bullet: Option<u32>,
+    decimal: Option<u32>,
+}
+
+impl Lists {
+    fn num_id(&mut self, pkg: &Package, numbered: bool) -> Result<u32> {
+        if let Some(id) = if numbered { self.decimal } else { self.bullet } {
+            return Ok(id);
+        }
+        if self.numbering.is_none() {
+            self.numbering = Some(match pkg.get_part(PART_NUMBERING) {
+                Some(bytes) => Document::parse(bytes, PART_NUMBERING)?,
+                None => {
+                    self.created = true;
+                    Document::parse(
+                        br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"></w:numbering>"#,
+                        PART_NUMBERING,
+                    )?
+                }
+            });
+        }
+        let doc = self.numbering.as_mut().expect("just ensured");
+        let cx = Cx::new(doc);
+        let max = |local: &str, attr: &str| {
+            doc.root
+                .elems()
+                .filter(|e| cx.is(e, local))
+                .filter_map(|e| {
+                    e.attr(&cx.n(attr))
+                        .and_then(|v| String::from_utf8_lossy(v).parse::<u32>().ok())
+                })
+                .max()
+        };
+        let abstract_id = max("abstractNum", "abstractNumId").map_or(0, |m| m + 1);
+        let num_id = max("num", "numId").map_or(1, |m| m + 1);
+        let w = String::from_utf8_lossy(&cx.w).into_owned();
+        let mut levels = String::new();
+        for i in 0..9u32 {
+            let left = 720 * (i + 1);
+            let (fmt, text, font) = if numbered {
+                let fmt = ["decimal", "lowerLetter", "lowerRoman"][(i % 3) as usize];
+                (fmt, format!("%{}.", i + 1), None)
+            } else {
+                match i % 3 {
+                    0 => ("bullet", "\u{F0B7}".to_string(), Some("Symbol")),
+                    1 => ("bullet", "o".to_string(), Some("Courier New")),
+                    _ => ("bullet", "\u{F0A7}".to_string(), Some("Wingdings")),
+                }
+            };
+            let rpr = font
+                .map(|f| format!("<{w}rPr><{w}rFonts {w}ascii=\"{f}\" {w}hAnsi=\"{f}\" {w}hint=\"default\"/></{w}rPr>"))
+                .unwrap_or_default();
+            levels.push_str(&format!(
+                "<{w}lvl {w}ilvl=\"{i}\"><{w}start {w}val=\"1\"/><{w}numFmt {w}val=\"{fmt}\"/><{w}lvlText {w}val=\"{text}\"/><{w}lvlJc {w}val=\"left\"/><{w}pPr><{w}ind {w}left=\"{left}\" {w}hanging=\"360\"/></{w}pPr>{rpr}</{w}lvl>",
+                text = escape(&text)
+            ));
+        }
+        let fragment = format!(
+            "<x xmlns:{p}=\"urn:x\"><{w}abstractNum {w}abstractNumId=\"{abstract_id}\"><{w}multiLevelType {w}val=\"hybridMultilevel\"/>{levels}</{w}abstractNum><{w}num {w}numId=\"{num_id}\"><{w}abstractNumId {w}val=\"{abstract_id}\"/></{w}num></x>",
+            p = w.trim_end_matches(':')
+        );
+        let frag = Document::parse(fragment.as_bytes(), PART_NUMBERING)?;
+        let mut nodes = frag.root.children.into_iter();
+        let (Some(Node::Elem(abs)), Some(Node::Elem(num))) = (nodes.next(), nodes.next()) else {
+            return Err(Error::Step("internal: bad numbering fragment".into()));
+        };
+        // CT_Numbering: every abstractNum precedes every num.
+        let first_num = doc
+            .root
+            .children
+            .iter()
+            .position(
+                |n| matches!(n, Node::Elem(e) if cx.is(e, "num") || cx.is(e, "numIdMacAtCleanup")),
+            )
+            .unwrap_or(doc.root.children.len());
+        doc.root.self_closing = false;
+        doc.root.children.insert(first_num, Node::Elem(abs));
+        let before_cleanup = doc
+            .root
+            .children
+            .iter()
+            .position(|n| matches!(n, Node::Elem(e) if cx.is(e, "numIdMacAtCleanup")))
+            .unwrap_or(doc.root.children.len());
+        doc.root.children.insert(before_cleanup, Node::Elem(num));
+        if numbered {
+            self.decimal = Some(num_id);
+        } else {
+            self.bullet = Some(num_id);
+        }
+        Ok(num_id)
+    }
+
+    fn save(self, pkg: &mut Package) -> Result<()> {
+        let Some(doc) = self.numbering else {
+            return Ok(());
+        };
+        pkg.set_part(PART_NUMBERING, doc.to_bytes());
+        if !self.created {
+            return Ok(());
+        }
+        if let Some(bytes) = pkg.get_part(PART_CONTENT_TYPES) {
+            let mut ct = Document::parse(bytes, PART_CONTENT_TYPES)?;
+            let exists = ct.root.elems().any(|e| {
+                e.local() == b"Override" && e.attr(b"PartName") == Some(b"/word/numbering.xml")
+            });
+            if !exists {
+                let mut o = Elem::new(b"Override".to_vec());
+                o.set_attr(b"PartName", "/word/numbering.xml");
+                o.set_attr(b"ContentType", CT_NUMBERING);
+                ct.root.self_closing = false;
+                ct.root.children.push(Node::Elem(o));
+                pkg.set_part(PART_CONTENT_TYPES, ct.to_bytes());
+            }
+        }
+        let mut rels = match pkg.get_part(PART_DOCUMENT_RELS) {
+            Some(bytes) => Document::parse(bytes, PART_DOCUMENT_RELS)?,
+            None => Document::parse(
+                br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>"#,
+                PART_DOCUMENT_RELS,
+            )?,
+        };
+        if !rels
+            .root
+            .elems()
+            .any(|e| e.attr(b"Type") == Some(REL_NUMBERING.as_bytes()))
+        {
+            let ids: Vec<String> = rels
+                .root
+                .elems()
+                .filter_map(|e| e.attr(b"Id").map(unescape))
+                .collect();
+            let mut n = ids.len() + 1;
+            while ids.contains(&format!("rId{n}")) {
+                n += 1;
+            }
+            let mut r = Elem::new(b"Relationship".to_vec());
+            r.set_attr(b"Id", &format!("rId{n}"));
+            r.set_attr(b"Type", REL_NUMBERING);
+            r.set_attr(b"Target", "numbering.xml");
+            rels.root.self_closing = false;
+            rels.root.children.push(Node::Elem(r));
+            pkg.set_part(PART_DOCUMENT_RELS, rels.to_bytes());
+        }
+        Ok(())
     }
 }
 
@@ -1582,6 +1846,63 @@ mod tests {
             "{}",
             doc_xml(&p)
         );
+    }
+
+    #[test]
+    fn list_creates_numbering_part_and_clear_removes_it() {
+        let mut p = pkg();
+        p.set_part(
+            PART_CONTENT_TYPES,
+            br#"<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"></Types>"#.to_vec(),
+        );
+        apply_steps(
+            &mut p,
+            &[
+                Step::List(find("world"), false, 0),
+                Step::List(find("cell"), true, 1),
+                Step::List(find("tail"), false, 2),
+            ],
+        )
+        .unwrap();
+        let x = doc_xml(&p);
+        assert!(x.contains(r#"<w:pPr><w:pStyle w:val="Normal"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr>"#), "{x}");
+        assert!(
+            x.contains(r#"<w:numPr><w:ilvl w:val="1"/><w:numId w:val="2"/></w:numPr>"#),
+            "{x}"
+        );
+        // The second bullet step reuses the first bullet definition.
+        assert!(
+            x.contains(r#"<w:numPr><w:ilvl w:val="2"/><w:numId w:val="1"/></w:numPr>"#),
+            "{x}"
+        );
+        let n = String::from_utf8(p.get_part(PART_NUMBERING).unwrap().to_vec()).unwrap();
+        assert_eq!(n.matches("<w:abstractNum ").count(), 2);
+        assert!(n.find("<w:abstractNum ").unwrap() < n.find("<w:num ").unwrap());
+        assert!(n.contains(r#"<w:lvlText w:val="%2."/>"#));
+        let ct = String::from_utf8(p.get_part(PART_CONTENT_TYPES).unwrap().to_vec()).unwrap();
+        assert!(ct.contains(r#"PartName="/word/numbering.xml""#));
+        let rels = String::from_utf8(p.get_part(PART_DOCUMENT_RELS).unwrap().to_vec()).unwrap();
+        assert!(rels.contains(REL_NUMBERING) && rels.contains(r#"Target="numbering.xml""#));
+        apply_steps(&mut p, &[Step::ListClear(find("world"))]).unwrap();
+        assert!(doc_xml(&p)
+            .contains(r#"<w:pPr><w:pStyle w:val="Normal"/></w:pPr><w:r><w:rPr><w:i/></w:rPr>"#));
+    }
+
+    #[test]
+    fn list_clear_suppresses_style_numbering_with_num_id_zero() {
+        let mut p = pkg();
+        let styles = STYLES.replace(
+            "</w:styles>",
+            r#"<w:style w:type="paragraph" w:styleId="ListBullet"><w:name w:val="List Bullet"/><w:pPr><w:numPr><w:numId w:val="5"/></w:numPr></w:pPr></w:style></w:styles>"#,
+        );
+        p.set_part(PART_STYLES, styles.into_bytes());
+        let doc = DOC.replace(
+            r#"<w:pStyle w:val="Normal"/>"#,
+            r#"<w:pStyle w:val="ListBullet"/>"#,
+        );
+        p.set_part(PART_DOCUMENT, doc.into_bytes());
+        apply_steps(&mut p, &[Step::ListClear(find("world"))]).unwrap();
+        assert!(doc_xml(&p).contains(r#"<w:pStyle w:val="ListBullet"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr>"#), "{}", doc_xml(&p));
     }
 
     #[test]

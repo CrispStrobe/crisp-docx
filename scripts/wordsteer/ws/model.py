@@ -315,6 +315,7 @@ class _Walker:
         self._chars: List[Tuple] = []
         self._notes = 0
         self._field_depth: List[bool] = []  # True while inside an instr part
+        self._instr: List[str] = []         # instruction text per open field
         self._inline(p, para_r, deleted=False)
         return Para("".join(self._text), self._chars,
                     {k: props.get(k) for k in PARA_PROPS}, in_table, self._notes)
@@ -349,6 +350,8 @@ class _Walker:
                 self._inline(child, para_r, deleted)
             elif tag == w("fldSimple"):
                 self.counts["fields"] = self.counts.get("fields", 0) + 1
+                if (_wattr(child, "instr") or "").strip().upper().startswith("HYPERLINK"):
+                    self.counts["hyperlinks"] = self.counts.get("hyperlinks", 0) + 1
                 self._inline(child, para_r, deleted)
             elif tag in (w("smartTag"), w("customXml"), w("sdt"), w("sdtContent"),
                          w("dir"), w("bdo")):
@@ -374,10 +377,21 @@ class _Walker:
                 if kind == "begin":
                     self.counts["fields"] = self.counts.get("fields", 0) + 1
                     self._field_depth.append(True)
-                elif kind == "separate" and self._field_depth:
-                    self._field_depth[-1] = False
-                elif kind == "end" and self._field_depth:
-                    self._field_depth.pop()
+                    self._instr.append("")
+                elif kind in ("separate", "end") and self._field_depth:
+                    if self._field_depth[-1] and self._instr:
+                        # A HYPERLINK complex field is a working link too.
+                        if self._instr[-1].strip().upper().startswith("HYPERLINK"):
+                            self.counts["hyperlinks"] = self.counts.get("hyperlinks", 0) + 1
+                    if kind == "separate":
+                        self._field_depth[-1] = False
+                    else:
+                        self._field_depth.pop()
+                        if self._instr:
+                            self._instr.pop()
+                continue
+            if tag == w("instrText") and self._in_instr() and self._instr:
+                self._instr[-1] += child.text or ""
                 continue
             if deleted or self._in_instr():
                 continue

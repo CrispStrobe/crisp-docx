@@ -71,7 +71,7 @@ enum Cmd {
     /// Apply editing steps from a JSON file (list of {"op": ...} objects).
     ///
     /// Ops: runFormat, paragraphFormat, replaceText, heading,
-    /// paragraphInsert, paragraphDelete, sectionFormat. Targets are
+    /// paragraphInsert, paragraphDelete, sectionFormat, list, listClear. Targets are
     /// {"target": {"find": "text", "occurrence": 1}} or quds-style
     /// {"paragraph": N, "start": S, "end": E}. Lengths in points.
     ApplySteps(ApplyStepsArgs),
@@ -623,6 +623,15 @@ fn parse_step(v: &serde_json::Value) -> Result<Step> {
         ),
         "paragraphInsert" => Step::ParagraphInsert(target()?, st("text").context("missing text")?),
         "paragraphDelete" => Step::ParagraphDelete(target()?),
+        "list" => Step::List(
+            target()?,
+            b("numbered").unwrap_or(false),
+            o.get("level")
+                .and_then(|x| x.as_u64())
+                .unwrap_or(0)
+                .min(255) as u8,
+        ),
+        "listClear" => Step::ListClear(target()?),
         "sectionFormat" => Step::SectionFormat(SectionFormat {
             section: o.get("section").and_then(|x| x.as_u64()).unwrap_or(0) as usize,
             top: f("top"),
