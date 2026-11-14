@@ -322,6 +322,10 @@ class _Walker:
     def _emit(self, s: str, eff: Dict[str, object]):
         if not s:
             return
+        # Symbol-font characters live in U+F000–F0FF whether written as
+        # w:sym or as w:t in a symbol font; compare them as one form.
+        if any("\uf000" <= ch <= "\uf0ff" for ch in s):
+            s = "".join(chr(ord(ch) - 0xF000) if "\uf000" <= ch <= "\uf0ff" else ch for ch in s)
         sig = tuple(_norm_char(k, eff.get(k)) for k in CHAR_PROPS)
         self._text.append(s)
         self._chars.extend([sig] * len(s))
