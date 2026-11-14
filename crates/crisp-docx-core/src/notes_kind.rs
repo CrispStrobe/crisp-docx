@@ -46,8 +46,9 @@ pub enum NotesKind {
 }
 
 /// Convert a package's notes from whichever kind it currently has to
-/// `target`. An opposite-kind part containing only separators does not block
-/// conversion. Packages with normal notes of both kinds are left unchanged;
+/// `target`. An opposite-kind part containing only default separator markers
+/// does not block conversion. Customized destination separators are refused
+/// atomically. Packages with normal notes of both kinds are left unchanged;
 /// their independent ID domains are not merged.
 pub fn convert_notes_kind(pkg: &mut Package, target: NotesKind) -> Result<()> {
     let has_footnotes = pkg.get_part(PART_FOOTNOTES).is_some();
@@ -64,6 +65,7 @@ pub fn convert_notes_kind(pkg: &mut Package, target: NotesKind) -> Result<()> {
             {
                 return Ok(());
             }
+            ensure_disposable_placeholder(pkg.get_part(destination).unwrap(), destination, to)?;
             let doc = pkg
                 .get_part(PART_DOCUMENT)
                 .ok_or_else(|| invalid(PART_DOCUMENT, "missing document part"))?;
@@ -211,6 +213,137 @@ fn normal_note_count(bytes: &[u8], part: &str, note_name: &str) -> Result<usize>
         return Err(invalid(part, "incomplete notes XML"));
     }
     Ok(normal)
+}
+
+// A note's type alone does not make its contents disposable. Separators
+// may contain arbitrary Word blocks, including user-authored text or images.
+// Only the default empty/marker bodies and their default spacing qualify.
+fn ensure_disposable_placeholder(bytes: &[u8], part: &str, note: &str) -> Result<()> {
+    let mut reader = NsReader::from_reader(bytes);
+    let mut buf = Vec::new();
+    let mut stack: Vec<Vec<u8>> = Vec::new();
+    let root = format!("{note}s");
+    let mut marker = String::new();
+    let mut seen_kinds = Vec::new();
+    let mut counts = [0usize; 5]; // paragraph, run, properties, spacing, marker
+    let custom = || {
+        invalid(
+            part,
+            "cannot replace customized destination note separators",
+        )
+    };
+    loop {
+        let event = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| xml_error(part, e))?;
+        let empty = matches!(event, Event::Empty(_));
+        match event {
+            Event::Eof => break,
+            Event::Start(e) | Event::Empty(e) => {
+                let (namespace, local) = reader.resolve_element(e.name());
+                if !is_word_namespace(&namespace) {
+                    return Err(custom());
+                }
+                let local = local.as_ref();
+                let parent = stack.last().map(Vec::as_slice);
+                let slot = match parent {
+                    None if local == root.as_bytes() => None,
+                    Some(p) if p == root.as_bytes() && local == note.as_bytes() => {
+                        counts.fill(0);
+                        marker.clear();
+                        None
+                    }
+                    Some(p) if p == note.as_bytes() && local == b"p" => Some(0),
+                    Some(b"p") if local == b"r" => Some(1),
+                    Some(b"p") if local == b"pPr" => Some(2),
+                    Some(b"pPr") if local == b"spacing" => Some(3),
+                    Some(b"r") if local == marker.as_bytes() => Some(4),
+                    _ => return Err(custom()),
+                };
+                if let Some(slot) = slot {
+                    counts[slot] += 1;
+                    if counts[slot] > 1 {
+                        return Err(custom());
+                    }
+                }
+                for a in e.attributes() {
+                    let a = a.map_err(|e| xml_error(part, e.into()))?;
+                    let value = a.unescape_value().map_err(|e| xml_error(part, e))?;
+                    let (ns, name) = reader.resolve_attribute(a.key);
+                    if a.key.as_ref() == b"xmlns" || a.key.as_ref().starts_with(b"xmlns:") {
+                        continue;
+                    }
+                    if stack.is_empty() {
+                        if matches!(ns, ResolveResult::Bound(ns) if ns.as_ref() == b"http://schemas.openxmlformats.org/markup-compatibility/2006")
+                            && name.as_ref() == b"Ignorable"
+                        {
+                            continue;
+                        }
+                        return Err(custom());
+                    }
+                    if !is_word_namespace(&ns) {
+                        return Err(custom());
+                    }
+                    let allowed = if local == note.as_bytes() {
+                        match name.as_ref() {
+                            b"id" => true,
+                            b"type"
+                                if matches!(
+                                    value.as_ref(),
+                                    "separator" | "continuationSeparator"
+                                ) =>
+                            {
+                                marker = value.into_owned();
+                                true
+                            }
+                            _ => false,
+                        }
+                    } else if matches!(local, b"p" | b"r") {
+                        matches!(
+                            name.as_ref(),
+                            b"rsidR" | b"rsidRPr" | b"rsidRDefault" | b"rsidP" | b"rsidDel"
+                        )
+                    } else if local == b"spacing" {
+                        matches!(
+                            (name.as_ref(), value.as_ref()),
+                            (b"before" | b"after", "0") | (b"line", "240") | (b"lineRule", "auto")
+                        )
+                    } else {
+                        false
+                    };
+                    if !allowed {
+                        return Err(custom());
+                    }
+                }
+                if local == note.as_bytes() {
+                    if marker.is_empty() || seen_kinds.contains(&marker) {
+                        return Err(custom());
+                    }
+                    seen_kinds.push(marker.clone());
+                }
+                if !empty {
+                    stack.push(local.to_vec());
+                }
+            }
+            Event::End(_) => {
+                stack.pop().ok_or_else(custom)?;
+            }
+            Event::Text(e) => {
+                if !e
+                    .unescape()
+                    .map_err(|e| xml_error(part, e))?
+                    .trim()
+                    .is_empty()
+                {
+                    return Err(custom());
+                }
+            }
+            Event::Decl(_) => {}
+            _ => return Err(custom()),
+        }
+        buf.clear();
+    }
+    Ok(())
 }
 
 fn contains_word_element(bytes: &[u8], part: &str, name: &str) -> Result<bool> {
@@ -392,7 +525,7 @@ fn rewrite_element(
             ));
         }
     }
-    result.clear_attributes();
+    let mut replacement_values = Vec::with_capacity(attrs.len());
     for (a, value) in attrs.iter().zip(&decoded) {
         // Style IDs are arbitrary references into styles.xml. Renaming a
         // built-in-looking ID would discard or change the source formatting.
@@ -414,11 +547,15 @@ fn rewrite_element(
         } else {
             None
         };
-        if let Some(value) = new_value {
-            // Known replacement values have no XML metacharacters.
-            result.push_attribute((a.key.as_ref(), value.as_bytes()));
-        } else {
-            result.push_attribute(a.clone());
+        replacement_values.push(new_value);
+    }
+    if replacement_values.iter().any(Option::is_some) {
+        result.clear_attributes();
+        for ((a, original), replacement) in attrs.iter().zip(&decoded).zip(&replacement_values) {
+            // Rebuilding normalizes delimiters to double quotes. Decode then
+            // escape every value, including unchanged single-quoted values.
+            let escaped = quick_xml::escape::escape(replacement.as_ref().unwrap_or(original));
+            result.push_attribute((a.key.as_ref(), escaped.as_bytes()));
         }
     }
     Ok(result)

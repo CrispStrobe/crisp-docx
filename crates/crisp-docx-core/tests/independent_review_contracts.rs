@@ -317,4 +317,81 @@ mod tests {
             ),
         }
     }
+    #[test]
+    fn strict_default_separator_placeholder_still_converts() {
+        let relation_base = "http://purl.oclc.org/ooxml/officeDocument/relationships";
+        let mut p = notes_package(STRICT_W, relation_base);
+        p.set_part("word/endnotes.xml", format!(r#"<w:endnotes xmlns:w="{STRICT_W}"><w:endnote w:type="separator" w:id="-1"><w:p w:rsidR="00000000"><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr><w:r><w:separator/></w:r></w:p></w:endnote></w:endnotes>"#).into_bytes());
+        let ct = xml(&p, "[Content_Types].xml").replace("</Types>", r#"<Override PartName="/word/endnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"/></Types>"#);
+        p.set_part("[Content_Types].xml", ct.into_bytes());
+        let rels = xml(&p, "word/_rels/document.xml.rels").replace("</Relationships>", &format!(r#"<Relationship Id="targetNotes" Type="{relation_base}/endnotes" Target="endnotes.xml"/></Relationships>"#));
+        p.set_part("word/_rels/document.xml.rels", rels.into_bytes());
+        convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
+        assert!(p.get_part("word/footnotes.xml").is_none());
+        assert!(xml(&p, "word/endnotes.xml").contains("<w:t>note</w:t>"));
+        assert_eq!(
+            xml(&p, "word/_rels/document.xml.rels")
+                .matches(&format!("{relation_base}/endnotes"))
+                .count(),
+            1
+        );
+        assert!(!xml(&p, "word/_rels/document.xml.rels").contains("targetNotes"));
+    }
+
+    #[test]
+    fn customized_separator_formatting_and_shapes_are_not_disposable() {
+        for body in [
+            r#"<w:p><w:pPr><w:spacing w:after="120"/></w:pPr><w:r><w:separator/></w:r></w:p>"#,
+            r#"<w:p><w:r><w:rPr><w:color w:val="112233"/></w:rPr><w:separator/></w:r></w:p>"#,
+            r#"<w:p><w:r><w:drawing/></w:r></w:p>"#,
+            r#"<w:p/><w:p/>"#,
+            r#"<w:tbl/>"#,
+        ] {
+            let mut p = notes_package(
+                W,
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+            );
+            p.set_part("word/endnotes.xml", format!(r#"<w:endnotes xmlns:w="{W}"><w:endnote w:type="separator" w:id="0">{body}</w:endnote></w:endnotes>"#).into_bytes());
+            let before = p.clone();
+            assert!(convert_notes_kind(&mut p, NotesKind::Endnotes)
+                .unwrap_err()
+                .to_string()
+                .contains("customized"));
+            assert_eq!(p.as_btree(), before.as_btree());
+        }
+    }
+
+    #[test]
+    fn changed_relationship_keeps_decoded_extension_attribute_value() {
+        let mut p = notes_package(
+            W,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        );
+        let rels = xml(&p, "word/_rels/document.xml.rels").replace(
+            r#"Id="note""#,
+            r#"Id="note" xmlns:x="urn:metadata" x:label='Pat "Lee" &amp; Co &lt;日本語&gt;'"#,
+        );
+        p.set_part("word/_rels/document.xml.rels", rels.into_bytes());
+        convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
+        let mut reader =
+            quick_xml::Reader::from_reader(p.get_part("word/_rels/document.xml.rels").unwrap());
+        let mut found = false;
+        loop {
+            match reader.read_event().unwrap() {
+                quick_xml::events::Event::Eof => break,
+                quick_xml::events::Event::Start(e) | quick_xml::events::Event::Empty(e) => {
+                    for attribute in e.attributes() {
+                        let attribute = attribute.unwrap();
+                        let value = attribute.unescape_value().unwrap();
+                        if attribute.key.as_ref() == b"x:label" {
+                            assert_eq!(value, "Pat \"Lee\" & Co <日本語>");
+                            found = true;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(found);
+    }
 }
