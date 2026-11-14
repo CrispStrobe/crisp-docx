@@ -274,4 +274,47 @@ mod tests {
         assert!(xml(&p, "word/endnotes.xml").contains(r#"w:val="FootnoteText""#));
         assert_eq!(p.get_part("word/styles.xml").unwrap(), styles);
     }
+    #[test]
+    fn customized_destination_separator_is_not_disposable() {
+        for kind in ["separator", "continuationNotice"] {
+            let mut p = notes_package(
+                W,
+                "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+            );
+            p.set_part("word/endnotes.xml", format!(r#"<w:endnotes xmlns:w="{W}"><w:endnote w:type="{kind}" w:id="0"><w:p><w:r><w:t>Retain this custom separator text</w:t></w:r></w:p></w:endnote></w:endnotes>"#).into_bytes());
+            let ct = xml(&p, "[Content_Types].xml").replace("</Types>", r#"<Override PartName="/word/endnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"/></Types>"#);
+            p.set_part("[Content_Types].xml", ct.into_bytes());
+            let rels = xml(&p, "word/_rels/document.xml.rels").replace("</Relationships>", r#"<Relationship Id="targetNotes" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes" Target="endnotes.xml"/></Relationships>"#);
+            p.set_part("word/_rels/document.xml.rels", rels.into_bytes());
+            let before = p.clone();
+            match convert_notes_kind(&mut p, NotesKind::Endnotes) {
+                Err(_) => assert_eq!(p.as_btree(), before.as_btree()),
+                Ok(()) => assert!(
+                    xml(&p, "word/endnotes.xml").contains("Retain this custom separator text"),
+                    "{kind}: {}",
+                    xml(&p, "word/endnotes.xml")
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn single_quoted_attributes_keep_embedded_literal_quotes() {
+        let mut p = notes_package(
+            W,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        );
+        let doc = xml(&p, "word/document.xml").replace("<w:body>", r#"<w:body><w:p><w:ins w:id="2" w:author='Pat "Lee" &amp; Co'><w:r><w:t>tracked</w:t></w:r></w:ins></w:p>"#);
+        p.set_part("word/document.xml", doc.into_bytes());
+        assert!(extract_paragraph_texts(&p).is_ok());
+        let before = p.clone();
+        match convert_notes_kind(&mut p, NotesKind::Endnotes) {
+            Err(_) => assert_eq!(p.as_btree(), before.as_btree()),
+            Ok(()) => assert!(
+                extract_paragraph_texts(&p).is_ok(),
+                "{}",
+                xml(&p, "word/document.xml")
+            ),
+        }
+    }
 }
