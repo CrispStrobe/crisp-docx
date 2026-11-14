@@ -24,7 +24,8 @@ fn xml<'a>(p: &'a Package, name: &str) -> &'a str {
 fn body_text_is_not_a_substitution_target() {
     let mut p = fixture();
     convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
-    assert!(xml(&p, "word/document.xml").contains("FootnoteText / FootnoteReference / w:footnoteRef / café 日本語"));
+    assert!(xml(&p, "word/document.xml")
+        .contains("FootnoteText / FootnoteReference / w:footnoteRef / café 日本語"));
     assert!(xml(&p, "word/document.xml").contains("<w:endnoteReference"));
 }
 
@@ -45,9 +46,15 @@ fn relationship_sidecar_moves_with_its_owner_and_round_trips() {
     p.set_part("word/_rels/footnotes.xml.rels", rels.clone());
     convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
     assert!(p.get_part("word/_rels/footnotes.xml.rels").is_none());
-    assert_eq!(p.get_part("word/_rels/endnotes.xml.rels"), Some(rels.as_slice()));
+    assert_eq!(
+        p.get_part("word/_rels/endnotes.xml.rels"),
+        Some(rels.as_slice())
+    );
     convert_notes_kind(&mut p, NotesKind::Footnotes).unwrap();
-    assert_eq!(p.get_part("word/_rels/footnotes.xml.rels"), Some(rels.as_slice()));
+    assert_eq!(
+        p.get_part("word/_rels/footnotes.xml.rels"),
+        Some(rels.as_slice())
+    );
     assert!(p.get_part("word/_rels/endnotes.xml.rels").is_none());
 }
 
@@ -106,7 +113,9 @@ fn dotted_internal_note_target_is_rewritten() {
 fn alternate_word_namespace_prefix_is_supported() {
     let mut p = fixture();
     for part in ["word/document.xml", "word/footnotes.xml"] {
-        let s = xml(&p, part).replace("xmlns:w=", "xmlns:q=").replace("w:", "q:");
+        let s = xml(&p, part)
+            .replace("xmlns:w=", "xmlns:q=")
+            .replace("w:", "q:");
         p.set_part(part, s.into_bytes());
     }
     convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
@@ -117,7 +126,9 @@ fn alternate_word_namespace_prefix_is_supported() {
 #[test]
 fn foreign_namespace_names_are_preserved() {
     let mut p = fixture();
-    let notes = format!(r#"<w:footnotes xmlns:w="{W}" xmlns:x="urn:foreign"><w:footnote w:id="1"><w:p><x:footnoteRef x:val="FootnoteReference"/><w:r><w:t>note</w:t></w:r></w:p></w:footnote></w:footnotes>"#);
+    let notes = format!(
+        r#"<w:footnotes xmlns:w="{W}" xmlns:x="urn:foreign"><w:footnote w:id="1"><w:p><x:footnoteRef x:val="FootnoteReference"/><w:r><w:t>note</w:t></w:r></w:p></w:footnote></w:footnotes>"#
+    );
     p.set_part("word/footnotes.xml", notes.into_bytes());
     convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
     assert!(xml(&p, "word/endnotes.xml").contains(r#"x:val="FootnoteReference""#));
@@ -126,7 +137,10 @@ fn foreign_namespace_names_are_preserved() {
 #[test]
 fn malformed_part_conversion_is_transactional() {
     let mut p = fixture();
-    p.set_part("word/document.xml", b"<w:document><w:body></w:document>".to_vec());
+    p.set_part(
+        "word/document.xml",
+        b"<w:document><w:body></w:document>".to_vec(),
+    );
     let before = p.clone();
     assert!(convert_notes_kind(&mut p, NotesKind::Endnotes).is_err());
     assert_eq!(p.as_btree(), before.as_btree());
@@ -135,7 +149,10 @@ fn malformed_part_conversion_is_transactional() {
 #[test]
 fn colliding_destination_relationship_part_is_rejected_transactionally() {
     let mut p = fixture();
-    p.set_part("word/_rels/footnotes.xml.rels", b"<Relationships/>".to_vec());
+    p.set_part(
+        "word/_rels/footnotes.xml.rels",
+        b"<Relationships/>".to_vec(),
+    );
     p.set_part("word/_rels/endnotes.xml.rels", b"<different/>".to_vec());
     let before = p.clone();
     assert!(convert_notes_kind(&mut p, NotesKind::Endnotes).is_err());
@@ -145,7 +162,10 @@ fn colliding_destination_relationship_part_is_rejected_transactionally() {
 #[test]
 fn explicit_empty_note_elements_are_renamed() {
     let mut p = fixture();
-    p.set_part("word/footnotes.xml", format!(r#"<w:footnotes xmlns:w="{W}"><w:footnote w:id="1"/></w:footnotes>"#).into_bytes());
+    p.set_part(
+        "word/footnotes.xml",
+        format!(r#"<w:footnotes xmlns:w="{W}"><w:footnote w:id="1"/></w:footnotes>"#).into_bytes(),
+    );
     convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
     assert!(xml(&p, "word/endnotes.xml").contains("<w:endnote "));
 }
