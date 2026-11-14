@@ -3,7 +3,8 @@
 //! Changed simple paragraphs collapse to the first run's formatting; rich
 //! paragraphs that cannot be represented by this operation fail atomically.
 
-use crate::error::Result;
+use crate::error::{Error, Result};
+use crate::ns::PART_DOCUMENT;
 use crate::package::Package;
 use crate::paragraph_runs::{extract_paragraphs, replace_paragraphs, Run};
 
@@ -21,9 +22,21 @@ pub fn extract_paragraph_texts(pkg: &Package) -> Result<Vec<String>> {
 /// and trailing indices retain their exact original XML, including rich data.
 pub fn replace_paragraph_texts(pkg: &mut Package, new_texts: &[String]) -> Result<()> {
     let mut paragraphs = extract_paragraphs(pkg)?;
-    for (p, text) in paragraphs.iter_mut().zip(new_texts) {
+    for (index, (p, text)) in paragraphs.iter_mut().zip(new_texts).enumerate() {
         if p.full_text() == *text {
             continue;
+        }
+        let mut saw_reference = false;
+        for run in &p.runs {
+            if saw_reference && !run.text.is_empty() {
+                return Err(Error::InvalidPackage {
+                    path: PART_DOCUMENT.into(),
+                    reason: format!(
+                        "paragraph {index} text replacement cannot preserve a note reference preceding later runs"
+                    ),
+                });
+            }
+            saw_reference |= !run.footnote_refs.is_empty();
         }
         let first_rpr = p.runs.first().and_then(|r| r.rpr_xml.clone());
         let references = p

@@ -154,6 +154,16 @@ fn inspect_shape(
 ) -> Result<()> {
     let parent_is_p = depth == p.depth + 1;
     let parent_is_r = run.as_ref().is_some_and(|(d, _)| depth == d + 1);
+    if parent_is_r
+        && matches!(local, b"t" | b"tab" | b"br" | b"cr")
+        && run
+            .as_ref()
+            .is_some_and(|(_, r)| !r.footnote_refs.is_empty())
+    {
+        // The public Run model stores references only after its text. An
+        // interior anchor cannot be reconstructed from that representation.
+        p.unsupported("a note reference preceding later text in the same run");
+    }
     let represented = match local {
         b"r" if parent_is_p => {
             if p.saw_bookmark_end {
