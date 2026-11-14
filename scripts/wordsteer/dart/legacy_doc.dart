@@ -7,7 +7,9 @@
 //     .dart_tool/package_config.json legacy_doc.dart -o legacy_doc
 //
 // Usage:
-//   legacy_doc convert INPUT.doc OUTPUT.docx   -> JSON report on stdout
+//   legacy_doc convert INPUT.doc OUTPUT.docx [--recover] -> JSON report
+//     (--recover: degrade auxiliary damage, as CrispCloud does when a person
+//      opens a file; needs a parser with `recover:` support)
 //   legacy_doc inspect INPUT.doc               -> JSON summary on stdout
 //
 // The report carries the converter's own limitations/preserved counts so the
@@ -22,7 +24,8 @@ void _emit(Map<String, Object?> value) =>
 
 Future<void> main(List<String> args) async {
   if (args.isEmpty ||
-      !(args[0] == 'convert' && args.length == 3 ||
+      !(args[0] == 'convert' &&
+              (args.length == 3 || args.length == 4 && args[3] == '--recover') ||
           args[0] == 'inspect' && args.length == 2)) {
     stderr.writeln('usage: legacy_doc convert IN.doc OUT.docx | inspect IN.doc');
     exitCode = 64;
@@ -41,7 +44,10 @@ Future<void> main(List<String> args) async {
       });
       return;
     }
-    final result = convertLegacyWord(bytes);
+    final result = args.length == 4
+        ? Function.apply(convertLegacyWord, [bytes], {#recover: true})
+              as LegacyWordStructuredConversion
+        : convertLegacyWord(bytes);
     File(args[2]).writeAsBytesSync(result.bytes);
     _emit({
       'ok': true,
