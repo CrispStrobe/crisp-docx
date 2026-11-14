@@ -156,6 +156,10 @@ def run(mode: str, roots: List[str], out_dir: str, limit: Optional[int] = None,
     processed = 0
     t0 = time.time()
     if use_word:
+        if not word.healthy():
+            log("STOP: Word's AppleScript object model is degraded (document names "
+                "resolve to `missing value`). Restart Word when convenient, then rerun.")
+            return
         word.cleanup_stage()
     log(f"{len(files)} candidate files, {len(done)} already done -> {results}")
     for path in files:
@@ -165,6 +169,9 @@ def run(mode: str, roots: List[str], out_dir: str, limit: Optional[int] = None,
         if free < min_free:
             log(f"STOP: only {free >> 20} MB free on disk (< {min_free >> 20} MB); "
                 f"stopping before the machine wedges. Free space, then rerun.")
+            break
+        if use_word and processed and processed % 5 == 0 and not word.healthy():
+            log("STOP: Word's AppleScript object model degraded mid-run; restart Word, then rerun.")
             break
         if os.path.exists(os.path.join(out_dir, "STOP")):
             log("STOP file found; stopping cleanly (rerun resumes).")

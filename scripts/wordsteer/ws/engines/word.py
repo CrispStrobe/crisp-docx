@@ -102,7 +102,17 @@ _OPEN = """
   set automation security to msoAutomationSecurityForceDisable
   try
     open file name my hfsOf({src}) without confirm conversions and add to recent files password document "ws-no-password" write password "ws-no-password"
-    set d to document {name}
+    -- Under load Word can return from `open` before the document is
+    -- addressable by name; wait for it rather than failing.
+    set d to missing value
+    repeat 100 times
+      try
+        set d to document {name}
+        exit repeat
+      end try
+      delay 0.2
+    end repeat
+    if d is missing value then error "wordsteer: document did not open" number 9003
 {hide}"""
 
 _CLOSE = """
@@ -118,7 +128,53 @@ _CLOSE = """
 """
 
 
+_PERMANENT = ("(9001)", "(9002)", "number 9001", "number 9002", "target not found",
+              "find/range mismatch", "does not implement")
+
+
+def _retrying(fn):
+    """Retry once on transient Word errors (busy app, late file). Never on
+    a hang, and never on deterministic outcomes such as target-not-found."""
+    import functools
+    import time
+
+    @functools.wraps(fn)
+    def wrapper(*a, **kw):
+        try:
+            return fn(*a, **kw)
+        except WordHung:
+            raise
+        except WordError as e:
+            if any(m in str(e) for m in _PERMANENT):
+                raise
+            time.sleep(2)
+            return fn(*a, **kw)
+    return wrapper
+
+
+LOCK = os.path.expanduser("~/.cache/wordsteer/word.lock")
+
+
 def run(script: str, timeout: float = 180) -> str:
+    """One osascript call, serialised across processes: Word's AppleScript
+    bridge degrades (documents resolve to `missing value` until Word is
+    restarted) when several clients drive it concurrently."""
+    import fcntl
+    os.makedirs(os.path.dirname(LOCK), exist_ok=True)
+    with open(LOCK, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        return _run_unlocked(script, timeout)
+
+
+def healthy() -> bool:
+    """False when Word's object model has degraded (names come back as
+    `missing value` although documents are open). Only a Word restart fixes
+    that; never attempt it automatically — the user may have unsaved work."""
+    out = run('tell application "Microsoft Word" to get {count documents, name of every document}', 30)
+    return "missing value" not in out
+
+
+def _run_unlocked(script: str, timeout: float) -> str:
     try:
         res = subprocess.run(["osascript", "-"], input=_PRELUDE + script,
                              capture_output=True, text=True, timeout=timeout)
@@ -187,6 +243,7 @@ def _save_as(dst: str, fmt: str) -> str:
             f"file format {FORMATS[fmt]}\n")
 
 
+@_retrying
 def convert(src: str, dst: str, timeout: float = 180) -> None:
     """Open src in Word and save a copy as dst (format from dst's extension)."""
     fmt = os.path.splitext(dst)[1].lstrip(".").lower()
@@ -218,8 +275,18 @@ def convert_chain(src: str, outputs: List[str], timeout: float = 240) -> Dict[st
             script = script.replace("close d saving no",
                                     f"close document {_q(os.path.basename(out))} saving no")
             try:
-                run(script, timeout)
-                _wait_for(out)
+                try:
+                    run(script, timeout)
+                    _wait_for(out)
+                except WordHung:
+                    raise
+                except WordError as e:  # one retry for transient errors
+                    if any(m in str(e) for m in _PERMANENT):
+                        raise
+                    import time
+                    time.sleep(2)
+                    run(script, timeout)
+                    _wait_for(out)
                 shutil.copyfile(out, dst)
                 cur = out
             except WordHung:
@@ -230,7 +297,7 @@ def convert_chain(src: str, outputs: List[str], timeout: float = 240) -> Dict[st
     return errors
 
 
-def _wait_for(path: str, tries: int = 50):
+def _wait_for(path: str, tries: int = 300):
     import time
     for _ in range(tries):
         if os.path.exists(path) and os.path.getsize(path) > 0:
@@ -262,6 +329,7 @@ def _target(t: Dict[str, object], var: str = "r") -> str:
     set wsOff to 0
       repeat with k from 1 to (count paragraphs of d)
         set ptxt to content of text object of paragraph k of d
+        if ptxt is missing value then set ptxt to ""
         set wsFrom to 1
         repeat while wsFrom <= (count ptxt)
           set o to my wsOffset(wsNeedle, (text wsFrom thru -1 of ptxt))
@@ -378,6 +446,7 @@ def _step(step: Dict[str, object]) -> str:
     raise WordError(f"unhandled {op}")
 
 
+@_retrying
 def apply(src: str, steps: List[Dict[str, object]], dst: str, timeout: float = 240) -> None:
     """Apply canonical steps in Word and save dst (docx/doc by extension)."""
     fmt = os.path.splitext(dst)[1].lstrip(".").lower()
