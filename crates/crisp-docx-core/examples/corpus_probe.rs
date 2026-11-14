@@ -40,8 +40,16 @@ fn probe(path: &Path, destination: &Path) -> anyhow::Result<Value> {
 
     let mut note_results = Vec::new();
     for (target, source, dest_name) in [
-        (NotesKind::Endnotes, "word/footnotes.xml", "notes-endnotes.docx"),
-        (NotesKind::Footnotes, "word/endnotes.xml", "notes-footnotes.docx"),
+        (
+            NotesKind::Endnotes,
+            "word/footnotes.xml",
+            "notes-endnotes.docx",
+        ),
+        (
+            NotesKind::Footnotes,
+            "word/endnotes.xml",
+            "notes-footnotes.docx",
+        ),
     ] {
         if pkg.get_part(source).is_none() {
             continue;
@@ -52,7 +60,8 @@ fn probe(path: &Path, destination: &Path) -> anyhow::Result<Value> {
         if result["ok"] == true && changed {
             copy.save(destination.join(dest_name))?;
         }
-        note_results.push(json!({"target":format!("{target:?}"),"result":result,"changed":changed}));
+        note_results
+            .push(json!({"target":format!("{target:?}"),"result":result,"changed":changed}));
     }
     Ok(json!({
         "file":path.file_name().unwrap().to_string_lossy(),"ok":true,
@@ -66,16 +75,24 @@ fn probe(path: &Path, destination: &Path) -> anyhow::Result<Value> {
 
 fn main() -> anyhow::Result<()> {
     let args = std::env::args().collect::<Vec<_>>();
-    anyhow::ensure!(args.len() == 3, "usage: corpus_probe INPUT_DIRECTORY OUTPUT_DIRECTORY");
+    anyhow::ensure!(
+        args.len() == 3,
+        "usage: corpus_probe INPUT_DIRECTORY OUTPUT_DIRECTORY"
+    );
     let mut paths = std::fs::read_dir(&args[1])?
         .map(|entry| entry.map(|entry| entry.path()))
         .collect::<std::io::Result<Vec<_>>>()?;
     paths.sort();
-    for path in paths.into_iter().filter(|p| p.extension().is_some_and(|e| e == "docx")) {
+    for path in paths
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "docx"))
+    {
         let destination = Path::new(&args[2]).join(path.file_stem().unwrap());
         let value = match probe(&path, &destination) {
             Ok(value) => value,
-            Err(error) => json!({"file":path.file_name().unwrap().to_string_lossy(),"ok":false,"error":error.to_string()}),
+            Err(error) => {
+                json!({"file":path.file_name().unwrap().to_string_lossy(),"ok":false,"error":error.to_string()})
+            }
         };
         println!("{value}");
     }

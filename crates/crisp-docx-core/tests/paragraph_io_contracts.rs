@@ -8,7 +8,11 @@ const W: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
 fn package(body: &str) -> Package {
     let mut p = Package::new();
-    p.set_part("[Content_Types].xml", br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>"#.to_vec());
+    p.set_part(
+        "[Content_Types].xml",
+        br#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>"#
+            .to_vec(),
+    );
     p.set_part("word/document.xml", format!(r#"<w:document xmlns:w="{W}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>{body}</w:body></w:document>"#).into_bytes());
     p.set_part("word/media/preserved.bin", vec![0, 1, 2, 3]);
     p
@@ -79,7 +83,10 @@ fn empty_paragraphs_have_stable_indices() {
     assert_eq!(extract_paragraph_texts(&p).unwrap(), ["", "", "", "tail"]);
     assert_eq!(extract_paragraph_runs(&p).unwrap().len(), 4);
     replace_paragraph_texts(&mut p, &["one".into(), "two".into(), "three".into()]).unwrap();
-    assert_eq!(extract_paragraph_texts(&p).unwrap(), ["one", "two", "three", "tail"]);
+    assert_eq!(
+        extract_paragraph_texts(&p).unwrap(),
+        ["one", "two", "three", "tail"]
+    );
 }
 
 #[test]
@@ -94,14 +101,18 @@ fn nested_textboxes_do_not_terminate_the_outer_paragraph() {
 
 #[test]
 fn paragraph_tab_stops_are_not_visible_text() {
-    let p = package(r#"<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="720"/></w:tabs></w:pPr><w:r><w:t>A</w:t><w:tab/><w:t>B</w:t></w:r></w:p>"#);
+    let p = package(
+        r#"<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="720"/></w:tabs></w:pPr><w:r><w:t>A</w:t><w:tab/><w:t>B</w:t></w:r></w:p>"#,
+    );
     assert_eq!(extract_paragraph_texts(&p).unwrap(), ["A\tB"]);
     assert_eq!(extract_paragraph_runs(&p).unwrap()[0].full_text(), "A\tB");
 }
 
 #[test]
 fn changed_text_keeps_the_first_run_format() {
-    let mut p = package(r#"<w:p><w:r><w:rPr><w:b/><w:color w:val="123456"/></w:rPr><w:t>old</w:t></w:r></w:p>"#);
+    let mut p = package(
+        r#"<w:p><w:r><w:rPr><w:b/><w:color w:val="123456"/></w:rPr><w:t>old</w:t></w:r></w:p>"#,
+    );
     replace_paragraph_texts(&mut p, &["new".into()]).unwrap();
     let runs = extract_paragraph_runs(&p).unwrap();
     assert_eq!(runs[0].full_text(), "new");
@@ -116,7 +127,10 @@ fn changed_plain_paragraph_leaves_adjacent_rich_xml_untouched() {
     replace_paragraph_texts(&mut p, &["new".into()]).unwrap();
     let xml = std::str::from_utf8(p.get_part("word/document.xml").unwrap()).unwrap();
     assert!(xml.contains(RICH[1]));
-    assert_eq!(p.get_part("word/media/preserved.bin"), Some([0, 1, 2, 3].as_slice()));
+    assert_eq!(
+        p.get_part("word/media/preserved.bin"),
+        Some([0, 1, 2, 3].as_slice())
+    );
 }
 
 #[test]
@@ -154,8 +168,10 @@ fn invalid_xml_characters_reject_without_mutation() {
 #[test]
 fn alternate_word_prefix_can_be_extracted_and_updated() {
     let mut p = package("<w:p><w:r><w:t>old</w:t></w:r></w:p>");
-    let xml = std::str::from_utf8(p.get_part("word/document.xml").unwrap()).unwrap()
-        .replace("xmlns:w=", "xmlns:q=").replace("w:", "q:");
+    let xml = std::str::from_utf8(p.get_part("word/document.xml").unwrap())
+        .unwrap()
+        .replace("xmlns:w=", "xmlns:q=")
+        .replace("w:", "q:");
     p.set_part("word/document.xml", xml.into_bytes());
     assert_eq!(extract_paragraph_texts(&p).unwrap(), ["old"]);
     replace_paragraph_texts(&mut p, &["new".into()]).unwrap();
@@ -166,7 +182,9 @@ fn alternate_word_prefix_can_be_extracted_and_updated() {
 
 #[test]
 fn nested_previous_run_properties_are_preserved_whole() {
-    let p = package(r#"<w:p><w:r><w:rPr><w:b/><w:rPrChange w:id="1" w:author="Editor"><w:rPr><w:i/></w:rPr></w:rPrChange></w:rPr><w:t>x</w:t></w:r></w:p>"#);
+    let p = package(
+        r#"<w:p><w:r><w:rPr><w:b/><w:rPrChange w:id="1" w:author="Editor"><w:rPr><w:i/></w:rPr></w:rPrChange></w:rPr><w:t>x</w:t></w:r></w:p>"#,
+    );
     let runs = extract_paragraph_runs(&p).unwrap();
     let xml = std::str::from_utf8(runs[0].runs[0].rpr_xml.as_ref().unwrap()).unwrap();
     assert!(xml.ends_with("</w:rPrChange></w:rPr>"));

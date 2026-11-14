@@ -1,398 +1,501 @@
-//! Run-level paragraph I/O.
+//! Paragraph run extraction and bounded replacement.
 //!
-//! Sister module to [`crate::paragraph_text`], which collapses every
-//! paragraph into a single run. That's the right shape when the
-//! transformation is text-only (e.g. translate-then-write-back). But
-//! when intra-paragraph formatting matters — bold spans, italic
-//! emphasis, run-level rStyle — we need to surface every individual
-//! `<w:r>` with its `<w:rPr>` so the caller can transform them
-//! piecewise and we can stitch the result back together.
-//!
-//! The pipeline this enables:
-//!
-//! ```text
-//! input.docx
-//!   ↓ extract_paragraphs
-//! Vec<ParagraphInfo>   each paragraph carries:
-//!                      - pPr (paragraph properties, preserved verbatim)
-//!                      - Vec<Run> with (text, rPr xml bytes, kind)
-//!                      - footnote ref positions (run index + character offset)
-//!                      - leading bookmark starts, trailing bookmark ends
-//!   ↓ caller transforms text  (translate via LLM, align via crisp-docx-align,
-//!                              redistribute runs over target text)
-//!   ↓ replace_paragraphs
-//! output.docx
-//! ```
-//!
-//! `ParagraphInfo`'s representation is deliberately minimal — opaque
-//! XML byte slices for things we don't introspect (pPr, rPr,
-//! bookmarks). The alignment-driven format-transfer in
-//! `crisp-docx-align` consumes these as-is.
-
-use std::borrow::Cow;
+//! Unchanged paragraphs retain their original XML byte-for-byte. A changed
+//! paragraph is rebuilt only when its content is representable by this flat
+//! run model. Rich wrappers, nested stories and positioned anchors otherwise
+//! produce an error before any package mutation.
 
 use quick_xml::events::{BytesEnd, BytesStart, BytesText, Event};
-use quick_xml::reader::Reader;
-use quick_xml::writer::Writer;
+use quick_xml::name::ResolveResult;
+use quick_xml::reader::NsReader;
+use quick_xml::Writer;
 
 use crate::error::{Error, Result};
-use crate::ns::PART_DOCUMENT;
+use crate::ns::{PART_DOCUMENT, W};
 use crate::package::Package;
 
-/// One run inside a paragraph. The `rpr_xml` bytes are the literal
-/// contents of `<w:rPr>...</w:rPr>` (including the enclosing tags); if
-/// the source run had no rPr, this is `None`.
-#[derive(Debug, Clone, Default)]
+/// One run's visible text, formatting and note references.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Run {
-    /// Concatenation of every `<w:t>` text node in this run, plus tabs
-    /// (`\t`) and line breaks (`\n`) for `<w:tab/>` / `<w:br/>` empty
-    /// children that appeared inside it. Empty if the run only carried
-    /// non-text content (e.g. a lone footnoteReference — see
-    /// [`Run::footnote_refs`]).
+    /// Visible text; tabs and line breaks use `\t`, `\n`, and `\r`.
     pub text: String,
-    /// Verbatim `<w:rPr>...</w:rPr>` bytes, if present. The caller can
-    /// re-emit this unchanged to preserve every property Word knows
-    /// about (font, colour, lang, rStyle, …).
+    /// Complete original run properties, including historical properties.
     pub rpr_xml: Option<Vec<u8>>,
-    /// `<w:footnoteReference w:id="N"/>` elements that lived inside
-    /// this run, in document order. Captured separately so the caller
-    /// can decide where to place them in the rebuilt paragraph; they
-    /// are typically anchored to a specific word.
+    /// Raw footnote or endnote reference elements. The existing field name
+    /// is retained for source compatibility. References emit after the text.
     pub footnote_refs: Vec<Vec<u8>>,
 }
 
-/// Everything we need to round-trip a body paragraph at run granularity.
-#[derive(Debug, Clone, Default)]
+/// An outer body paragraph, including table-cell paragraphs. Nested textbox
+/// text is exposed in its containing run; changing that rich paragraph is
+/// rejected because this flat representation cannot preserve its topology.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ParagraphInfo {
-    /// Verbatim `<w:pPr>...</w:pPr>` bytes, if present. Preserves the
-    /// paragraph's style id, alignment, spacing, and so on.
+    /// Paragraph properties, preserved as complete original XML.
     pub ppr_xml: Option<Vec<u8>>,
-    /// The runs that make up the paragraph text, in document order.
+    /// Runs in source order.
     pub runs: Vec<Run>,
-    /// `<w:bookmarkStart .../>` elements that appeared as direct
-    /// children of the paragraph *before* the first run.
+    /// Leading bookmark starts.
     pub leading_bookmark_starts: Vec<Vec<u8>>,
-    /// `<w:bookmarkEnd .../>` elements that appeared as direct
-    /// children of the paragraph *after* the last run.
+    /// Trailing bookmark elements. Mid-paragraph positions are retained only
+    /// by an unchanged paragraph, whose original XML is passed through.
     pub trailing_bookmark_ends: Vec<Vec<u8>>,
 }
 
 impl ParagraphInfo {
-    /// The full paragraph text — concatenation of every run's text.
+    /// Concatenated visible run text.
     pub fn full_text(&self) -> String {
         self.runs.iter().map(|r| r.text.as_str()).collect()
     }
 }
 
-/// Extract every body paragraph at run granularity.
-pub fn extract_paragraphs(pkg: &Package) -> Result<Vec<ParagraphInfo>> {
-    let doc = pkg
-        .get_part(PART_DOCUMENT)
-        .ok_or_else(|| Error::InvalidPackage {
-            path: PART_DOCUMENT.into(),
-            reason: format!("missing part {PART_DOCUMENT}"),
-        })?;
+struct ParsedParagraph {
+    info: ParagraphInfo,
+    start: usize,
+    open_end: usize,
+    close_start: usize,
+    end: usize,
+    opening: BytesStart<'static>,
+    empty: bool,
+    depth: usize,
+    unsupported: Option<String>,
+    saw_bookmark_end: bool,
+}
 
-    let mut reader = Reader::from_reader(doc);
-    let mut buf = Vec::new();
-    let mut out: Vec<ParagraphInfo> = Vec::new();
-    let mut cur: Option<ParagraphInfo> = None;
-    let mut p_depth = 0i32;
+impl ParsedParagraph {
+    fn unsupported(&mut self, detail: impl Into<String>) {
+        if self.unsupported.is_none() {
+            self.unsupported = Some(detail.into());
+        }
+    }
+}
 
-    // pPr capture: when inside <w:p> and we open <w:pPr>, accumulate
-    // every byte through the matching close into a side buffer.
-    let mut ppr_depth = 0i32;
-    let mut ppr_buf: Vec<u8> = Vec::new();
+#[derive(Clone, Copy)]
+enum CaptureKind {
+    ParagraphProperties,
+    RunProperties,
+    Reference,
+    BookmarkStart,
+    BookmarkEnd,
+    Ignore,
+}
 
-    // Per-run state.
-    let mut in_r = false;
-    let mut r_depth = 0i32;
-    let mut current_run: Run = Run::default();
+struct Capture {
+    depth: usize,
+    start: usize,
+    kind: CaptureKind,
+}
 
-    // rPr capture within a run, same shape as pPr.
-    let mut rpr_depth = 0i32;
-    let mut rpr_buf: Vec<u8> = Vec::new();
+fn invalid(reason: impl Into<String>) -> Error {
+    Error::InvalidPackage {
+        path: PART_DOCUMENT.into(),
+        reason: reason.into(),
+    }
+}
 
-    // <w:t> text gating: only push char data into `current_run.text`
-    // when we're inside a w:t and not inside rPr.
-    let mut in_wt = false;
+fn xml_err(source: quick_xml::Error) -> Error {
+    Error::XmlParse {
+        part: PART_DOCUMENT.into(),
+        source,
+    }
+}
 
-    loop {
-        let evt = reader
-            .read_event_into(&mut buf)
-            .map_err(|e| Error::XmlParse {
-                part: PART_DOCUMENT.into(),
-                source: e,
-            })?;
-        match &evt {
-            Event::Eof => break,
-            Event::Start(e) if e.name().as_ref() == b"w:p" && p_depth == 0 => {
-                p_depth = 1;
-                cur = Some(ParagraphInfo::default());
+fn word_local(reader: &NsReader<&[u8]>, name: quick_xml::name::QName<'_>) -> Result<Vec<u8>> {
+    let (ns, local) = reader.resolve_element(name);
+    match ns {
+        ResolveResult::Bound(ns)
+            if ns.as_ref() == W
+                || ns.as_ref() == b"http://purl.oclc.org/ooxml/wordprocessingml/main" =>
+        {
+            Ok(local.as_ref().to_vec())
+        }
+        ResolveResult::Unknown(prefix) => Err(xml_err(quick_xml::Error::UnknownPrefix(prefix))),
+        _ => Ok(Vec::new()),
+    }
+}
+
+fn record_capture(
+    p: &mut ParsedParagraph,
+    run: &mut Option<(usize, Run)>,
+    kind: CaptureKind,
+    xml: &[u8],
+) {
+    match kind {
+        CaptureKind::ParagraphProperties => p.info.ppr_xml = Some(xml.to_vec()),
+        CaptureKind::RunProperties => {
+            if let Some((_, r)) = run {
+                r.rpr_xml = Some(xml.to_vec());
             }
-            Event::End(e) if e.name().as_ref() == b"w:p" && p_depth == 1 => {
-                p_depth = 0;
-                if let Some(info) = cur.take() {
-                    out.push(info);
-                }
+        }
+        CaptureKind::Reference => {
+            if let Some((_, r)) = run {
+                r.footnote_refs.push(xml.to_vec());
             }
-            // pPr (direct child of w:p)
-            Event::Start(e) if p_depth == 1 && !in_r && e.name().as_ref() == b"w:pPr" => {
-                ppr_depth = 1;
-                ppr_buf.clear();
-                let mut w = Writer::new(&mut ppr_buf);
-                let _ = w.write_event(Event::Start(e.clone()));
+        }
+        CaptureKind::BookmarkStart => {
+            if p.info.runs.is_empty() {
+                p.info.leading_bookmark_starts.push(xml.to_vec());
+            } else {
+                p.info.trailing_bookmark_ends.push(xml.to_vec());
             }
-            Event::End(e) if p_depth == 1 && ppr_depth >= 1 && e.name().as_ref() == b"w:pPr" => {
-                let mut w = Writer::new(&mut ppr_buf);
-                let _ = w.write_event(Event::End(e.clone()));
-                if let Some(info) = cur.as_mut() {
-                    info.ppr_xml = Some(std::mem::take(&mut ppr_buf));
-                }
-                ppr_depth = 0;
+        }
+        CaptureKind::BookmarkEnd => p.info.trailing_bookmark_ends.push(xml.to_vec()),
+        CaptureKind::Ignore => {}
+    }
+}
+
+fn inspect_shape(
+    p: &mut ParsedParagraph,
+    run: &Option<(usize, Run)>,
+    e: &BytesStart<'_>,
+    local: &[u8],
+    depth: usize,
+    reader: &NsReader<&[u8]>,
+) -> Result<()> {
+    let parent_is_p = depth == p.depth + 1;
+    let parent_is_r = run.as_ref().is_some_and(|(d, _)| depth == d + 1);
+    let represented = match local {
+        b"r" if parent_is_p => {
+            if p.saw_bookmark_end {
+                p.unsupported("a bookmark ends before later runs");
             }
-            _ if ppr_depth >= 1 => {
-                // Forward every event inside pPr into the buffer.
-                let mut w = Writer::new(&mut ppr_buf);
-                if let Event::Start(_) = &evt {
-                    ppr_depth += 1;
-                } else if let Event::End(_) = &evt {
-                    ppr_depth -= 1;
-                }
-                let _ = w.write_event(evt.clone());
-                buf.clear();
-                continue;
+            true
+        }
+        b"pPr" if parent_is_p => true,
+        b"rPr" | b"t" | b"tab" | b"br" | b"cr" | b"footnoteReference" | b"endnoteReference"
+            if parent_is_r =>
+        {
+            true
+        }
+        b"bookmarkStart" if parent_is_p => {
+            if !p.info.runs.is_empty() {
+                p.unsupported("a bookmark starts between runs");
             }
-            // Run open
-            Event::Start(e) if p_depth == 1 && !in_r && e.name().as_ref() == b"w:r" => {
-                in_r = true;
-                r_depth = 1;
-                current_run = Run::default();
-            }
-            Event::End(e)
-                if p_depth == 1 && in_r && r_depth == 1 && e.name().as_ref() == b"w:r" =>
+            true
+        }
+        b"bookmarkEnd" if parent_is_p => {
+            p.saw_bookmark_end = true;
+            true
+        }
+        _ => false,
+    };
+    if !represented {
+        p.unsupported(format!(
+            "element <{}>",
+            String::from_utf8_lossy(e.name().as_ref())
+        ));
+    }
+    if local == b"br" {
+        for a in e.attributes() {
+            let a = a.map_err(|e| xml_err(e.into()))?;
+            let (_, local) = reader.resolve_attribute(a.key);
+            let value = a.unescape_value().map_err(xml_err)?;
+            if (local.as_ref() == b"type" && value != "textWrapping")
+                || (local.as_ref() == b"clear" && value != "none")
             {
-                if let Some(info) = cur.as_mut() {
-                    info.runs.push(std::mem::take(&mut current_run));
+                p.unsupported("a page/column or clearing break");
+            }
+        }
+    }
+    Ok(())
+}
+
+fn parse_paragraphs(doc: &[u8]) -> Result<Vec<ParsedParagraph>> {
+    let mut reader = NsReader::from_reader(doc);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    let mut current: Option<ParsedParagraph> = None;
+    let mut run: Option<(usize, Run)> = None;
+    let mut text_depth = None;
+    let mut capture: Option<Capture> = None;
+    let mut depth = 0usize;
+    let mut roots = 0usize;
+    loop {
+        let start = reader.buffer_position() as usize;
+        let event = reader.read_event_into(&mut buf).map_err(xml_err)?;
+        let end = reader.buffer_position() as usize;
+        let empty = matches!(event, Event::Empty(_));
+        match event {
+            Event::Eof => break,
+            Event::Start(e) | Event::Empty(e) => {
+                let local = word_local(&reader, e.name())?;
+                for a in e.attributes() {
+                    a.map_err(|e| xml_err(e.into()))?
+                        .unescape_value()
+                        .map_err(xml_err)?;
                 }
-                in_r = false;
-                r_depth = 0;
-            }
-            // rPr (direct child of w:r)
-            Event::Start(e) if in_r && r_depth == 1 && e.name().as_ref() == b"w:rPr" => {
-                rpr_depth = 1;
-                rpr_buf.clear();
-                let mut w = Writer::new(&mut rpr_buf);
-                let _ = w.write_event(Event::Start(e.clone()));
-            }
-            Event::End(e) if in_r && rpr_depth >= 1 && e.name().as_ref() == b"w:rPr" => {
-                let mut w = Writer::new(&mut rpr_buf);
-                let _ = w.write_event(Event::End(e.clone()));
-                current_run.rpr_xml = Some(std::mem::take(&mut rpr_buf));
-                rpr_depth = 0;
-            }
-            _ if rpr_depth >= 1 => {
-                let mut w = Writer::new(&mut rpr_buf);
-                if let Event::Start(_) = &evt {
-                    rpr_depth += 1;
-                } else if let Event::End(_) = &evt {
-                    rpr_depth -= 1;
+                if depth == 0 {
+                    roots += 1;
                 }
-                let _ = w.write_event(evt.clone());
-                buf.clear();
-                continue;
-            }
-            // <w:t> gating
-            Event::Start(e) if in_r && e.name().as_ref() == b"w:t" => {
-                in_wt = true;
-            }
-            Event::End(e) if in_r && e.name().as_ref() == b"w:t" => {
-                in_wt = false;
-            }
-            Event::Text(t) if in_r && in_wt => {
-                let decoded = t.unescape().unwrap_or(Cow::Borrowed(""));
-                current_run.text.push_str(&decoded);
-            }
-            // tab / br inside a run
-            Event::Empty(e) if in_r && e.name().as_ref() == b"w:tab" => {
-                current_run.text.push('\t');
-            }
-            Event::Empty(e) if in_r && e.name().as_ref() == b"w:br" => {
-                current_run.text.push('\n');
-            }
-            // Footnote ref inside a run
-            Event::Empty(e) if in_r && e.name().as_ref() == b"w:footnoteReference" => {
-                let mut tmp: Vec<u8> = Vec::new();
-                let mut w = Writer::new(&mut tmp);
-                let _ = w.write_event(Event::Empty(e.clone()));
-                current_run.footnote_refs.push(tmp);
-            }
-            // Bookmarks at the paragraph level (direct children of w:p).
-            Event::Empty(e) if p_depth == 1 && !in_r && e.name().as_ref() == b"w:bookmarkStart" => {
-                let mut tmp: Vec<u8> = Vec::new();
-                let mut w = Writer::new(&mut tmp);
-                let _ = w.write_event(Event::Empty(e.clone()));
-                if let Some(info) = cur.as_mut() {
-                    if info.runs.is_empty() {
-                        info.leading_bookmark_starts.push(tmp);
+                let element_depth = depth + 1;
+                if current.is_none() && local == b"p" {
+                    let p = ParsedParagraph {
+                        info: ParagraphInfo::default(),
+                        start,
+                        open_end: end,
+                        close_start: end,
+                        end,
+                        opening: e.clone().into_owned(),
+                        empty,
+                        depth: element_depth,
+                        unsupported: None,
+                        saw_bookmark_end: false,
+                    };
+                    if empty {
+                        out.push(p);
                     } else {
-                        // Mid-paragraph bookmark — uncommon. For now we
-                        // append to trailing to keep the invariant
-                        // "bookmarks frame the paragraph".
-                        info.trailing_bookmark_ends.push(tmp);
+                        current = Some(p);
+                    }
+                } else if let Some(p) = current.as_mut() {
+                    if capture.is_none() {
+                        inspect_shape(p, &run, &e, &local, element_depth, &reader)?;
+                        let kind = match local.as_slice() {
+                            b"pPr" => Some(if element_depth == p.depth + 1 {
+                                CaptureKind::ParagraphProperties
+                            } else {
+                                CaptureKind::Ignore
+                            }),
+                            b"rPr" => Some(
+                                if run.as_ref().is_some_and(|(d, _)| element_depth == d + 1) {
+                                    CaptureKind::RunProperties
+                                } else {
+                                    CaptureKind::Ignore
+                                },
+                            ),
+                            b"footnoteReference" | b"endnoteReference" if run.is_some() => {
+                                Some(CaptureKind::Reference)
+                            }
+                            b"bookmarkStart" if element_depth == p.depth + 1 => {
+                                Some(CaptureKind::BookmarkStart)
+                            }
+                            b"bookmarkEnd" if element_depth == p.depth + 1 => {
+                                Some(CaptureKind::BookmarkEnd)
+                            }
+                            _ => None,
+                        };
+                        if let Some(kind) = kind {
+                            if empty {
+                                record_capture(p, &mut run, kind, &doc[start..end]);
+                            } else {
+                                capture = Some(Capture {
+                                    depth: element_depth,
+                                    start,
+                                    kind,
+                                });
+                            }
+                        } else if local == b"r" && run.is_none() {
+                            if empty {
+                                p.info.runs.push(Run::default());
+                            } else {
+                                run = Some((element_depth, Run::default()));
+                            }
+                        } else if local == b"t" && run.is_some() && !empty {
+                            text_depth = Some(element_depth);
+                        } else if let Some((_, r)) = run.as_mut() {
+                            match local.as_slice() {
+                                b"tab" => r.text.push('\t'),
+                                b"br" => r.text.push('\n'),
+                                b"cr" => r.text.push('\r'),
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                if !empty {
+                    depth += 1;
+                }
+            }
+            Event::End(e) => {
+                let local = word_local(&reader, e.name())?;
+                if let Some(c) = &capture {
+                    if c.depth == depth {
+                        if let Some(p) = current.as_mut() {
+                            record_capture(p, &mut run, c.kind, &doc[c.start..end]);
+                        }
+                        capture = None;
+                    }
+                } else if let Some(p) = current.as_mut() {
+                    if text_depth == Some(depth) && local == b"t" {
+                        text_depth = None;
+                    }
+                    if local == b"r" && run.as_ref().is_some_and(|(d, _)| *d == depth) {
+                        p.info.runs.push(run.take().unwrap().1);
+                    }
+                    if local == b"p" && depth == p.depth {
+                        p.close_start = start;
+                        p.end = end;
+                        out.push(current.take().unwrap());
+                    }
+                }
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or_else(|| invalid("unbalanced XML closing element"))?;
+            }
+            Event::Text(e) => {
+                let text = e.unescape().map_err(xml_err)?;
+                if depth == 0 && !text.trim().is_empty() {
+                    return Err(invalid("text outside XML document element"));
+                }
+                if capture.is_none() && text_depth.is_some() {
+                    if let Some((_, run)) = run.as_mut() {
+                        run.text.push_str(&text);
                     }
                 }
             }
-            Event::Empty(e) if p_depth == 1 && !in_r && e.name().as_ref() == b"w:bookmarkEnd" => {
-                let mut tmp: Vec<u8> = Vec::new();
-                let mut w = Writer::new(&mut tmp);
-                let _ = w.write_event(Event::Empty(e.clone()));
-                if let Some(info) = cur.as_mut() {
-                    info.trailing_bookmark_ends.push(tmp);
+            Event::CData(e) if capture.is_none() && text_depth.is_some() => {
+                let text =
+                    std::str::from_utf8(e.as_ref()).map_err(|_| invalid("invalid UTF-8 text"))?;
+                if let Some((_, run)) = run.as_mut() {
+                    run.text.push_str(text);
                 }
-            }
-            Event::Start(_) if in_r => {
-                r_depth += 1;
-            }
-            Event::End(_) if in_r => {
-                r_depth -= 1;
             }
             _ => {}
         }
         buf.clear();
     }
-
+    if roots != 1 || depth != 0 || current.is_some() {
+        return Err(invalid("expected one complete XML document element"));
+    }
     Ok(out)
 }
 
-/// Rebuild every body paragraph from the structured `paragraphs` slice.
-///
-/// Paragraphs not covered by the slice (i.e. `index >= paragraphs.len()`)
-/// are passed through unchanged. Other paragraphs are replaced byte-for-byte
-/// with the new structure: leading bookmark starts, pPr, runs, trailing
-/// bookmark ends.
-///
-/// Each run emits as `<w:r>{rpr_xml?}<w:t xml:space="preserve">{text}</w:t>
-/// {footnote_refs*}</w:r>`. Footnote refs are placed at the end of the run.
+/// Extract outer paragraphs in document order, including empty paragraphs
+/// and paragraphs in table cells. Nested textbox paragraphs remain within
+/// their outer run and do not consume another replacement index.
+pub fn extract_paragraphs(pkg: &Package) -> Result<Vec<ParagraphInfo>> {
+    let doc = pkg
+        .get_part(PART_DOCUMENT)
+        .ok_or_else(|| invalid("missing word/document.xml"))?;
+    Ok(parse_paragraphs(doc)?.into_iter().map(|p| p.info).collect())
+}
+
+/// Replace supported paragraphs at matching indices. Unchanged paragraphs
+/// and indices beyond `paragraphs.len()` retain exact original XML. Changed
+/// rich paragraphs fail atomically instead of losing unrepresented content.
 pub fn replace_paragraphs(pkg: &mut Package, paragraphs: &[ParagraphInfo]) -> Result<()> {
     let doc = pkg
         .get_part(PART_DOCUMENT)
-        .ok_or_else(|| Error::InvalidPackage {
-            path: PART_DOCUMENT.into(),
-            reason: format!("missing part {PART_DOCUMENT}"),
-        })?
-        .to_vec();
-    let mut reader = Reader::from_reader(doc.as_slice());
-    let mut out: Vec<u8> = Vec::with_capacity(doc.len());
-    let mut writer = Writer::new(&mut out);
-    let mut buf = Vec::new();
-
-    let mut p_index = 0usize;
-    let mut rewriting = false;
-    let mut p_depth = 0i32;
-
-    loop {
-        let evt = reader
-            .read_event_into(&mut buf)
-            .map_err(|e| Error::XmlParse {
-                part: PART_DOCUMENT.into(),
-                source: e,
-            })?;
-        match &evt {
-            Event::Eof => break,
-            Event::Start(e) if e.name().as_ref() == b"w:p" && p_depth == 0 => {
-                if p_index < paragraphs.len() {
-                    rewriting = true;
-                    writer
-                        .write_event(Event::Start(e.clone()))
-                        .map_err(xml_err)?;
-                    emit_paragraph(&mut writer, &paragraphs[p_index])?;
-                } else {
-                    writer
-                        .write_event(Event::Start(e.clone()))
-                        .map_err(xml_err)?;
-                }
-                p_depth = 1;
-            }
-            Event::End(e) if e.name().as_ref() == b"w:p" && p_depth == 1 => {
-                writer.write_event(Event::End(e.clone())).map_err(xml_err)?;
-                rewriting = false;
-                p_depth = 0;
-                p_index += 1;
-            }
-            _ if rewriting => {
-                // swallow everything between Start(w:p) and End(w:p)
-            }
-            other => {
-                writer.write_event(other.clone()).map_err(xml_err)?;
-            }
+        .ok_or_else(|| invalid("missing word/document.xml"))?;
+    let originals = parse_paragraphs(doc)?;
+    let mut out = Vec::with_capacity(doc.len());
+    let mut cursor = 0usize;
+    let mut changed = false;
+    for (index, (old, new)) in originals.iter().zip(paragraphs).enumerate() {
+        if old.info == *new {
+            continue;
         }
-        buf.clear();
+        if let Some(reason) = &old.unsupported {
+            return Err(invalid(format!(
+                "paragraph {index} replacement cannot preserve {reason}"
+            )));
+        }
+        changed = true;
+        out.extend_from_slice(&doc[cursor..old.start]);
+        let name = std::str::from_utf8(old.opening.name().as_ref())
+            .map_err(|_| invalid("invalid paragraph name"))?
+            .to_string();
+        let prefix = name.strip_suffix('p').unwrap_or("w:");
+        let mut writer = Writer::new(&mut out);
+        if old.empty {
+            writer
+                .write_event(Event::Start(old.opening.clone()))
+                .map_err(xml_err)?;
+        } else {
+            writer
+                .get_mut()
+                .extend_from_slice(&doc[old.start..old.open_end]);
+        }
+        emit_paragraph(&mut writer, new, prefix)?;
+        if old.empty {
+            writer
+                .write_event(Event::End(BytesEnd::new(name)))
+                .map_err(xml_err)?;
+        } else {
+            writer
+                .get_mut()
+                .extend_from_slice(&doc[old.close_start..old.end]);
+        }
+        cursor = old.end;
     }
-
-    drop(writer);
-    pkg.set_part(PART_DOCUMENT, out);
+    if changed {
+        out.extend_from_slice(&doc[cursor..]);
+        if parse_paragraphs(&out)?.len() != originals.len() {
+            return Err(invalid("replacement changed paragraph topology"));
+        }
+        pkg.set_part(PART_DOCUMENT, out);
+    }
     Ok(())
 }
 
-fn emit_paragraph<W: std::io::Write>(writer: &mut Writer<W>, info: &ParagraphInfo) -> Result<()> {
-    if let Some(pp) = &info.ppr_xml {
-        writer.get_mut().write_all(pp).map_err(|e| Error::Io {
-            path: PART_DOCUMENT.into(),
-            source: e,
-        })?;
+fn write_text<W: std::io::Write>(writer: &mut Writer<W>, text: &str, prefix: &str) -> Result<()> {
+    if text.chars().any(|c| !matches!(c, '\t' | '\n' | '\r' | '\u{20}'..='\u{d7ff}' | '\u{e000}'..='\u{fffd}' | '\u{10000}'..='\u{10ffff}')) {
+        return Err(invalid("replacement contains an invalid XML character"));
     }
-    for bs in &info.leading_bookmark_starts {
-        writer.get_mut().write_all(bs).map_err(|e| Error::Io {
-            path: PART_DOCUMENT.into(),
-            source: e,
-        })?;
+    let mut start = 0;
+    for (index, c) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), '\0')))
+    {
+        if matches!(c, '\t' | '\n' | '\r' | '\0') {
+            if start < index {
+                let name = format!("{prefix}t");
+                let mut tag = BytesStart::new(&name);
+                tag.push_attribute(("xml:space", "preserve"));
+                writer.write_event(Event::Start(tag)).map_err(xml_err)?;
+                writer
+                    .write_event(Event::Text(BytesText::new(&text[start..index])))
+                    .map_err(xml_err)?;
+                writer
+                    .write_event(Event::End(BytesEnd::new(name)))
+                    .map_err(xml_err)?;
+            }
+            if c != '\0' {
+                let local = match c {
+                    '\t' => "tab",
+                    '\n' => "br",
+                    _ => "cr",
+                };
+                writer
+                    .write_event(Event::Empty(BytesStart::new(format!("{prefix}{local}"))))
+                    .map_err(xml_err)?;
+                start = index + c.len_utf8();
+            }
+        }
+    }
+    Ok(())
+}
+
+fn emit_paragraph<W: std::io::Write>(
+    writer: &mut Writer<W>,
+    info: &ParagraphInfo,
+    prefix: &str,
+) -> Result<()> {
+    if let Some(pp) = &info.ppr_xml {
+        writer.get_mut().write_all(pp)?;
+    }
+    for start in &info.leading_bookmark_starts {
+        writer.get_mut().write_all(start)?;
     }
     for run in &info.runs {
+        let name = format!("{prefix}r");
         writer
-            .write_event(Event::Start(BytesStart::new("w:r")))
+            .write_event(Event::Start(BytesStart::new(&name)))
             .map_err(xml_err)?;
         if let Some(rpr) = &run.rpr_xml {
-            writer.get_mut().write_all(rpr).map_err(|e| Error::Io {
-                path: PART_DOCUMENT.into(),
-                source: e,
-            })?;
+            writer.get_mut().write_all(rpr)?;
         }
-        if !run.text.is_empty() {
-            let mut t_start = BytesStart::new("w:t");
-            t_start.push_attribute(("xml:space", "preserve"));
-            writer.write_event(Event::Start(t_start)).map_err(xml_err)?;
-            writer
-                .write_event(Event::Text(BytesText::new(&run.text)))
-                .map_err(xml_err)?;
-            writer
-                .write_event(Event::End(BytesEnd::new("w:t")))
-                .map_err(xml_err)?;
-        }
-        for fr in &run.footnote_refs {
-            writer.get_mut().write_all(fr).map_err(|e| Error::Io {
-                path: PART_DOCUMENT.into(),
-                source: e,
-            })?;
+        write_text(writer, &run.text, prefix)?;
+        for reference in &run.footnote_refs {
+            writer.get_mut().write_all(reference)?;
         }
         writer
-            .write_event(Event::End(BytesEnd::new("w:r")))
+            .write_event(Event::End(BytesEnd::new(name)))
             .map_err(xml_err)?;
     }
-    for be in &info.trailing_bookmark_ends {
-        writer.get_mut().write_all(be).map_err(|e| Error::Io {
-            path: PART_DOCUMENT.into(),
-            source: e,
-        })?;
+    for end in &info.trailing_bookmark_ends {
+        writer.get_mut().write_all(end)?;
     }
     Ok(())
-}
-
-fn xml_err(e: quick_xml::Error) -> Error {
-    Error::XmlParse {
-        part: PART_DOCUMENT.into(),
-        source: e,
-    }
 }
 
 #[cfg(test)]
