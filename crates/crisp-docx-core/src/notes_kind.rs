@@ -27,17 +27,38 @@ pub enum NotesKind {
 }
 
 /// Convert a package's notes from whichever kind it currently has to
-/// `target`. No-op if the target kind is already present, or if the
-/// package has no notes part at all. Packages containing both kinds are
-/// left unchanged; their independent ID domains are not merged.
+/// `target`. An opposite-kind part containing only separators does not block
+/// conversion. Packages with normal notes of both kinds are left unchanged;
+/// their independent ID domains are not merged.
 pub fn convert_notes_kind(pkg: &mut Package, target: NotesKind) -> Result<()> {
     let has_footnotes = pkg.get_part(PART_FOOTNOTES).is_some();
     let has_endnotes = pkg.get_part(PART_ENDNOTES).is_some();
     match (target, has_footnotes, has_endnotes) {
         (_, false, false) => Ok(()),
-        (NotesKind::Footnotes, true, _) | (NotesKind::Endnotes, _, true) => Ok(()),
-        (NotesKind::Endnotes, true, false) => convert(pkg, true),
-        (NotesKind::Footnotes, false, true) => convert(pkg, false),
+        (_, true, true) => {
+            let (source, destination, from, to) = match target {
+                NotesKind::Endnotes => (PART_FOOTNOTES, PART_ENDNOTES, "footnote", "endnote"),
+                NotesKind::Footnotes => (PART_ENDNOTES, PART_FOOTNOTES, "endnote", "footnote"),
+            };
+            if normal_note_count(pkg.get_part(destination).unwrap(), destination, to)? > 0
+                || normal_note_count(pkg.get_part(source).unwrap(), source, from)? == 0
+            {
+                return Ok(());
+            }
+            let doc = pkg
+                .get_part(PART_DOCUMENT)
+                .ok_or_else(|| invalid(PART_DOCUMENT, "missing document part"))?;
+            if contains_word_element(doc, PART_DOCUMENT, &format!("{to}Reference"))? {
+                return Err(invalid(
+                    destination,
+                    "separator-only destination has active note references",
+                ));
+            }
+            convert(pkg, target == NotesKind::Endnotes, true)
+        }
+        (NotesKind::Footnotes, true, false) | (NotesKind::Endnotes, false, true) => Ok(()),
+        (NotesKind::Endnotes, true, false) => convert(pkg, true, false),
+        (NotesKind::Footnotes, false, true) => convert(pkg, false, false),
     }
 }
 
@@ -52,9 +73,10 @@ struct Conversion {
     target_relationship: &'static str,
     source_style: &'static str,
     target_style: &'static str,
+    replace_placeholder: bool,
 }
 
-fn convert(pkg: &mut Package, to_endnotes: bool) -> Result<()> {
+fn convert(pkg: &mut Package, to_endnotes: bool, replace_placeholder: bool) -> Result<()> {
     let c = if to_endnotes {
         Conversion {
             from: "footnote",
@@ -67,6 +89,7 @@ fn convert(pkg: &mut Package, to_endnotes: bool) -> Result<()> {
             target_relationship: REL_TYPE_ENDNOTES,
             source_style: "Footnote",
             target_style: "Endnote",
+            replace_placeholder,
         }
     } else {
         Conversion {
@@ -80,6 +103,7 @@ fn convert(pkg: &mut Package, to_endnotes: bool) -> Result<()> {
             target_relationship: REL_TYPE_FOOTNOTES,
             source_style: "Endnote",
             target_style: "Footnote",
+            replace_placeholder,
         }
     };
     let source_rels = format!("word/_rels/{}s.xml.rels", c.from);
@@ -107,11 +131,155 @@ fn convert(pkg: &mut Package, to_endnotes: bool) -> Result<()> {
     for (part, bytes) in updates {
         pkg.set_part(part, bytes);
     }
+    if replace_placeholder {
+        pkg.remove_part(c.target_part);
+    }
     pkg.rename_part(c.source_part, c.target_part);
     // Both owners stay in word/, so every relative resource target is
     // unchanged. Preserve this relationship part byte-for-byte.
     pkg.rename_part(&source_rels, target_rels);
     Ok(())
+}
+
+fn normal_note_count(bytes: &[u8], part: &str, note_name: &str) -> Result<usize> {
+    let mut reader = NsReader::from_reader(bytes);
+    let mut buf = Vec::new();
+    let mut depth = 0usize;
+    let mut roots = 0usize;
+    let mut normal = 0usize;
+    loop {
+        let event = reader
+            .read_event_into(&mut buf)
+            .map_err(|e| xml_error(part, e))?;
+        let empty = matches!(event, Event::Empty(_));
+        match event {
+            Event::Eof => break,
+            Event::Start(e) | Event::Empty(e) => {
+                let (namespace, local) = reader.resolve_element(e.name());
+                let word = matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == W);
+                if depth == 0 {
+                    roots += 1;
+                    if !word || local.as_ref() != format!("{note_name}s").as_bytes() {
+                        return Err(invalid(part, "unexpected notes root element"));
+                    }
+                } else if depth == 1 {
+                    if !word || local.as_ref() != note_name.as_bytes() {
+                        return Err(invalid(part, "unsupported child in notes part"));
+                    }
+                    let mut kind = None;
+                    for a in e.attributes() {
+                        let a = a.map_err(|e| xml_error(part, e.into()))?;
+                        let (namespace, local) = reader.resolve_attribute(a.key);
+                        let value = a.unescape_value().map_err(|e| xml_error(part, e))?;
+                        if matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == W)
+                            && local.as_ref() == b"type"
+                        {
+                            kind = Some(value.into_owned());
+                        }
+                    }
+                    match kind.as_deref() {
+                        None | Some("normal") => normal += 1,
+                        Some("separator" | "continuationSeparator" | "continuationNotice") => {}
+                        _ => return Err(invalid(part, "unknown note kind")),
+                    }
+                }
+                if !empty {
+                    depth += 1;
+                }
+            }
+            Event::End(_) => {
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or_else(|| invalid(part, "unbalanced notes XML"))?;
+            }
+            Event::Text(e) => {
+                let text = e.unescape().map_err(|e| xml_error(part, e))?;
+                if depth == 0 && !text.trim().is_empty() {
+                    return Err(invalid(part, "text outside notes root"));
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+    if depth != 0 || roots != 1 {
+        return Err(invalid(part, "incomplete notes XML"));
+    }
+    Ok(normal)
+}
+
+fn contains_word_element(bytes: &[u8], part: &str, name: &str) -> Result<bool> {
+    let mut reader = NsReader::from_reader(bytes);
+    let mut buf = Vec::new();
+    loop {
+        match reader
+            .read_event_into(&mut buf)
+            .map_err(|e| xml_error(part, e))?
+        {
+            Event::Eof => return Ok(false),
+            Event::Start(e) | Event::Empty(e) => {
+                let (namespace, local) = reader.resolve_element(e.name());
+                if matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == W)
+                    && local.as_ref() == name.as_bytes()
+                {
+                    return Ok(true);
+                }
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+}
+
+fn is_placeholder_declaration(
+    e: &BytesStart<'_>,
+    reader: &NsReader<&[u8]>,
+    part: &str,
+    c: &Conversion,
+) -> Result<bool> {
+    if !c.replace_placeholder {
+        return Ok(false);
+    }
+    let (namespace, local) = reader.resolve_element(e.name());
+    let relationship = part == PART_DOCUMENT_RELS
+        && local.as_ref() == b"Relationship"
+        && matches!(&namespace, ResolveResult::Bound(ns) if ns.as_ref() == PKG_RELS);
+    let content_type = part == PART_CONTENT_TYPES
+        && local.as_ref() == b"Override"
+        && matches!(&namespace, ResolveResult::Bound(ns) if ns.as_ref() == CONTENT_TYPES_NS);
+    let mut attributes = Vec::new();
+    for a in e.attributes() {
+        let a = a.map_err(|e| xml_error(part, e.into()))?;
+        let value = a.unescape_value().map_err(|e| xml_error(part, e))?;
+        attributes.push((a.key.as_ref().to_vec(), value.into_owned()));
+    }
+    let attr = |key: &[u8]| {
+        attributes
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    if relationship && attr(b"Type") == Some(c.target_relationship) {
+        if attr(b"TargetMode").is_some_and(|value| value != "Internal")
+            || attr(b"Target").and_then(resolve_note_target).as_deref() != Some(c.target_part)
+        {
+            return Err(invalid(
+                part,
+                "destination notes relationship does not identify the placeholder",
+            ));
+        }
+        return Ok(true);
+    }
+    if content_type && attr(b"PartName") == Some(&format!("/{}", c.target_part)) {
+        if attr(b"ContentType") != Some(c.target_content_type) {
+            return Err(invalid(
+                part,
+                "destination content type does not identify the placeholder",
+            ));
+        }
+        return Ok(true);
+    }
+    Ok(false)
 }
 
 fn invalid(part: &str, reason: &str) -> Error {
@@ -266,6 +434,7 @@ fn rewrite_xml(bytes: &[u8], part: &str, c: &Conversion) -> Result<Vec<u8>> {
     let mut buf = Vec::new();
     let mut depth = 0usize;
     let mut roots = 0usize;
+    let mut skipped_depth = None;
     loop {
         let event = reader
             .read_event_into(&mut buf)
@@ -277,18 +446,35 @@ fn rewrite_xml(bytes: &[u8], part: &str, c: &Conversion) -> Result<Vec<u8>> {
                     roots += 1;
                 }
                 depth += 1;
+                if skipped_depth.is_some() || is_placeholder_declaration(&e, &reader, part, c)? {
+                    skipped_depth.get_or_insert(depth);
+                    buf.clear();
+                    continue;
+                }
                 Event::Start(rewrite_element(&e, &reader, part, c)?)
             }
             Event::Empty(e) => {
                 if depth == 0 {
                     roots += 1;
                 }
+                if skipped_depth.is_some() || is_placeholder_declaration(&e, &reader, part, c)? {
+                    buf.clear();
+                    continue;
+                }
                 Event::Empty(rewrite_element(&e, &reader, part, c)?)
             }
             Event::End(e) => {
+                let closing_depth = depth;
                 depth = depth
                     .checked_sub(1)
                     .ok_or_else(|| invalid(part, "unbalanced XML closing element"))?;
+                if let Some(skipped) = skipped_depth {
+                    if closing_depth == skipped {
+                        skipped_depth = None;
+                    }
+                    buf.clear();
+                    continue;
+                }
                 let (namespace, local) = reader.resolve_element(e.name());
                 if matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == W) {
                     if let Some(local) = word_name(local.as_ref(), c) {
@@ -305,7 +491,15 @@ fn rewrite_xml(bytes: &[u8], part: &str, c: &Conversion) -> Result<Vec<u8>> {
                 if depth == 0 && !value.trim().is_empty() {
                     return Err(invalid(part, "text outside the XML document element"));
                 }
+                if skipped_depth.is_some() {
+                    buf.clear();
+                    continue;
+                }
                 Event::Text(e.into_owned())
+            }
+            _ if skipped_depth.is_some() => {
+                buf.clear();
+                continue;
             }
             other => other.into_owned(),
         };

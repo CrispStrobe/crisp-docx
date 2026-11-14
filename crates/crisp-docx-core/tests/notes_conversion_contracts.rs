@@ -176,7 +176,10 @@ fn add_endnotes(p: &mut Package, normal: bool) {
     } else {
         r#"<w:endnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:endnote><w:endnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:endnote>"#
     };
-    p.set_part("word/endnotes.xml", format!(r#"<w:endnotes xmlns:w="{W}">{body}</w:endnotes>"#).into_bytes());
+    p.set_part(
+        "word/endnotes.xml",
+        format!(r#"<w:endnotes xmlns:w="{W}">{body}</w:endnotes>"#).into_bytes(),
+    );
     let ct = xml(p, "[Content_Types].xml").replace("</Types>", r#"<Override PartName="/word/endnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.endnotes+xml"/></Types>"#);
     p.set_part("[Content_Types].xml", ct.into_bytes());
     let rels = xml(p, "word/_rels/document.xml.rels").replace("</Relationships>", r#"<Relationship Id="emptyTarget" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/endnotes" Target="endnotes.xml"/></Relationships>"#);
@@ -190,8 +193,18 @@ fn opposite_kind_separator_placeholder_does_not_block_conversion() {
     convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
     assert!(p.get_part("word/footnotes.xml").is_none());
     assert!(xml(&p, "word/endnotes.xml").contains("<w:t>FootnoteText / w:footnoteRef</w:t>"));
-    assert_eq!(xml(&p, "[Content_Types].xml").matches("/word/endnotes.xml").count(), 1);
-    assert_eq!(xml(&p, "word/_rels/document.xml.rels").matches("relationships/endnotes").count(), 1);
+    assert_eq!(
+        xml(&p, "[Content_Types].xml")
+            .matches("/word/endnotes.xml")
+            .count(),
+        1
+    );
+    assert_eq!(
+        xml(&p, "word/_rels/document.xml.rels")
+            .matches("relationships/endnotes")
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -207,7 +220,10 @@ fn populated_opposite_kind_is_not_merged_or_overwritten() {
 fn target_placeholder_with_active_reference_is_rejected_atomically() {
     let mut p = fixture();
     add_endnotes(&mut p, false);
-    let doc = xml(&p, "word/document.xml").replace("</w:body>", r#"<w:p><w:r><w:endnoteReference w:id="0"/></w:r></w:p></w:body>"#);
+    let doc = xml(&p, "word/document.xml").replace(
+        "</w:body>",
+        r#"<w:p><w:r><w:endnoteReference w:id="0"/></w:r></w:p></w:body>"#,
+    );
     p.set_part("word/document.xml", doc.into_bytes());
     let before = p.clone();
     assert!(convert_notes_kind(&mut p, NotesKind::Endnotes).is_err());
@@ -218,7 +234,11 @@ fn target_placeholder_with_active_reference_is_rejected_atomically() {
 fn malformed_target_placeholder_is_rejected_atomically() {
     let mut p = fixture();
     add_endnotes(&mut p, false);
-    p.set_part("word/endnotes.xml", format!(r#"<w:endnotes xmlns:w="{W}"><w:endnote w:type="separator" w:id="0">"#).into_bytes());
+    p.set_part(
+        "word/endnotes.xml",
+        format!(r#"<w:endnotes xmlns:w="{W}"><w:endnote w:type="separator" w:id="0">"#)
+            .into_bytes(),
+    );
     let before = p.clone();
     assert!(convert_notes_kind(&mut p, NotesKind::Endnotes).is_err());
     assert_eq!(p.as_btree(), before.as_btree());
