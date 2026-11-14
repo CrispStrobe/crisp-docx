@@ -240,4 +240,38 @@ mod tests {
         .is_err());
         assert_eq!(p.as_btree(), before.as_btree());
     }
+    #[test]
+    fn strict_notes_convert_both_directions_and_preserve_namespace_family() {
+        let relation_base = "http://purl.oclc.org/ooxml/officeDocument/relationships";
+        let mut p = notes_package(STRICT_W, relation_base);
+        let styles = p.get_part("word/styles.xml").unwrap().to_vec();
+        convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
+        assert!(p.get_part("word/footnotes.xml").is_none());
+        assert!(xml(&p, "word/endnotes.xml").contains("<w:endnotes"));
+        assert!(xml(&p, "word/endnotes.xml").contains(STRICT_W));
+        assert!(xml(&p, "word/document.xml").contains("<w:endnoteReference"));
+        assert!(
+            xml(&p, "word/_rels/document.xml.rels").contains(&format!("{relation_base}/endnotes"))
+        );
+        convert_notes_kind(&mut p, NotesKind::Footnotes).unwrap();
+        assert!(p.get_part("word/endnotes.xml").is_none());
+        assert!(xml(&p, "word/footnotes.xml").contains("<w:footnotes"));
+        assert!(
+            xml(&p, "word/_rels/document.xml.rels").contains(&format!("{relation_base}/footnotes"))
+        );
+        assert_eq!(p.get_part("word/styles.xml").unwrap(), styles);
+    }
+
+    #[test]
+    fn opposite_style_definition_cannot_override_source_formatting() {
+        let mut p = notes_package(
+            W,
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+        );
+        let styles = xml(&p, "word/styles.xml").replace("</w:styles>", r#"<w:style w:type="paragraph" w:styleId="EndnoteText"><w:name w:val="unrelated endnote style"/><w:rPr><w:color w:val="ABCDEF"/></w:rPr></w:style></w:styles>"#).into_bytes();
+        p.set_part("word/styles.xml", styles.clone());
+        convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
+        assert!(xml(&p, "word/endnotes.xml").contains(r#"w:val="FootnoteText""#));
+        assert_eq!(p.get_part("word/styles.xml").unwrap(), styles);
+    }
 }

@@ -11,10 +11,29 @@ use quick_xml::Writer;
 use crate::error::{Error, Result};
 use crate::ns::{
     CONTENT_TYPES_NS, CT_ENDNOTES, CT_FOOTNOTES, PART_CONTENT_TYPES, PART_DOCUMENT,
-    PART_DOCUMENT_RELS, PART_ENDNOTES, PART_FOOTNOTES, PKG_RELS, REL_TYPE_ENDNOTES,
-    REL_TYPE_FOOTNOTES, W,
+    PART_DOCUMENT_RELS, PART_ENDNOTES, PART_FOOTNOTES, PKG_RELS, W,
 };
 use crate::package::Package;
+
+const STRICT_W: &[u8] = b"http://purl.oclc.org/ooxml/wordprocessingml/main";
+const RELATIONSHIP_BASES: [&str; 2] = [
+    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/",
+    "http://purl.oclc.org/ooxml/officeDocument/relationships/",
+];
+
+fn is_word_namespace(namespace: &ResolveResult<'_>) -> bool {
+    matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == W || ns.as_ref() == STRICT_W)
+}
+
+fn is_note_relationship(value: Option<&str>, kind: &str) -> bool {
+    value.is_some_and(|value| {
+        RELATIONSHIP_BASES.iter().any(|base| {
+            value
+                .strip_prefix(base)
+                .is_some_and(|suffix| suffix == format!("{kind}s"))
+        })
+    })
+}
 
 /// Which kind of note the package should end up containing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,10 +88,6 @@ struct Conversion {
     target_part: &'static str,
     source_content_type: &'static str,
     target_content_type: &'static str,
-    source_relationship: &'static str,
-    target_relationship: &'static str,
-    source_style: &'static str,
-    target_style: &'static str,
     replace_placeholder: bool,
 }
 
@@ -85,10 +100,6 @@ fn convert(pkg: &mut Package, to_endnotes: bool, replace_placeholder: bool) -> R
             target_part: PART_ENDNOTES,
             source_content_type: CT_FOOTNOTES,
             target_content_type: CT_ENDNOTES,
-            source_relationship: REL_TYPE_FOOTNOTES,
-            target_relationship: REL_TYPE_ENDNOTES,
-            source_style: "Footnote",
-            target_style: "Endnote",
             replace_placeholder,
         }
     } else {
@@ -99,10 +110,6 @@ fn convert(pkg: &mut Package, to_endnotes: bool, replace_placeholder: bool) -> R
             target_part: PART_FOOTNOTES,
             source_content_type: CT_ENDNOTES,
             target_content_type: CT_FOOTNOTES,
-            source_relationship: REL_TYPE_ENDNOTES,
-            target_relationship: REL_TYPE_FOOTNOTES,
-            source_style: "Endnote",
-            target_style: "Footnote",
             replace_placeholder,
         }
     };
@@ -156,7 +163,7 @@ fn normal_note_count(bytes: &[u8], part: &str, note_name: &str) -> Result<usize>
             Event::Eof => break,
             Event::Start(e) | Event::Empty(e) => {
                 let (namespace, local) = reader.resolve_element(e.name());
-                let word = matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == W);
+                let word = is_word_namespace(&namespace);
                 if depth == 0 {
                     roots += 1;
                     if !word || local.as_ref() != format!("{note_name}s").as_bytes() {
@@ -171,9 +178,7 @@ fn normal_note_count(bytes: &[u8], part: &str, note_name: &str) -> Result<usize>
                         let a = a.map_err(|e| xml_error(part, e.into()))?;
                         let (namespace, local) = reader.resolve_attribute(a.key);
                         let value = a.unescape_value().map_err(|e| xml_error(part, e))?;
-                        if matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == W)
-                            && local.as_ref() == b"type"
-                        {
+                        if is_word_namespace(&namespace) && local.as_ref() == b"type" {
                             kind = Some(value.into_owned());
                         }
                     }
@@ -219,9 +224,7 @@ fn contains_word_element(bytes: &[u8], part: &str, name: &str) -> Result<bool> {
             Event::Eof => return Ok(false),
             Event::Start(e) | Event::Empty(e) => {
                 let (namespace, local) = reader.resolve_element(e.name());
-                if matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == W)
-                    && local.as_ref() == name.as_bytes()
-                {
+                if is_word_namespace(&namespace) && local.as_ref() == name.as_bytes() {
                     return Ok(true);
                 }
             }
@@ -259,7 +262,7 @@ fn is_placeholder_declaration(
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.as_str())
     };
-    if relationship && attr(b"Type") == Some(c.target_relationship) {
+    if relationship && is_note_relationship(attr(b"Type"), c.to) {
         if attr(b"TargetMode").is_some_and(|value| value != "Internal")
             || attr(b"Target").and_then(resolve_note_target).as_deref() != Some(c.target_part)
         {
@@ -341,7 +344,7 @@ fn rewrite_element(
     if let ResolveResult::Unknown(prefix) = namespace {
         return Err(xml_error(part, quick_xml::Error::UnknownPrefix(prefix)));
     }
-    let is_w = matches!(&namespace, ResolveResult::Bound(ns) if ns.as_ref() == W);
+    let is_w = is_word_namespace(&namespace);
     let is_rel = matches!(&namespace, ResolveResult::Bound(ns) if ns.as_ref() == PKG_RELS)
         && local.as_ref() == b"Relationship"
         && part == PART_DOCUMENT_RELS;
@@ -374,7 +377,7 @@ fn rewrite_element(
             .find(|(a, _)| a.key.as_ref() == key)
             .map(|(_, v)| v.as_str())
     };
-    let convert_rel = is_rel && attr(b"Type") == Some(c.source_relationship);
+    let convert_rel = is_rel && is_note_relationship(attr(b"Type"), c.from);
     let convert_override = is_override && attr(b"PartName") == Some(&format!("/{}", c.source_part));
     if convert_rel {
         if attr(b"TargetMode").is_some_and(|s| s != "Internal") {
@@ -391,18 +394,11 @@ fn rewrite_element(
     }
     result.clear_attributes();
     for (a, value) in attrs.iter().zip(&decoded) {
-        let (attr_ns, attr_local) = reader.resolve_attribute(a.key);
-        let new_value = if is_w
-            && matches!(local.as_ref(), b"pStyle" | b"rStyle")
-            && matches!(attr_ns, ResolveResult::Bound(ns) if ns.as_ref() == W)
-            && attr_local.as_ref() == b"val"
-        {
-            ["Text", "Reference"].into_iter().find_map(|suffix| {
-                (value == &format!("{}{suffix}", c.source_style))
-                    .then(|| format!("{}{suffix}", c.target_style))
-            })
-        } else if convert_rel && a.key.as_ref() == b"Type" {
-            Some(c.target_relationship.to_string())
+        // Style IDs are arbitrary references into styles.xml. Renaming a
+        // built-in-looking ID would discard or change the source formatting.
+        let new_value = if convert_rel && a.key.as_ref() == b"Type" {
+            let base = value.rsplit_once('/').unwrap().0;
+            Some(format!("{base}/{}s", c.to))
         } else if convert_rel && a.key.as_ref() == b"Target" {
             Some(format!("{}s.xml", c.to))
         } else if convert_override && a.key.as_ref() == b"PartName" {
@@ -476,7 +472,7 @@ fn rewrite_xml(bytes: &[u8], part: &str, c: &Conversion) -> Result<Vec<u8>> {
                     continue;
                 }
                 let (namespace, local) = reader.resolve_element(e.name());
-                if matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == W) {
+                if is_word_namespace(&namespace) {
                     if let Some(local) = word_name(local.as_ref(), c) {
                         Event::End(BytesEnd::new(qualified_name(e.name().as_ref(), &local)))
                     } else {

@@ -35,8 +35,8 @@ fn note_text_is_not_a_substitution_target() {
     convert_notes_kind(&mut p, NotesKind::Endnotes).unwrap();
     let s = xml(&p, "word/endnotes.xml");
     assert!(s.contains("<w:t>FootnoteText / w:footnoteRef</w:t>"));
-    assert!(s.contains(r#"w:val="EndnoteText""#));
-    assert!(s.contains(r#"w:val="EndnoteReference""#));
+    assert!(s.contains(r#"w:val="FootnoteText""#));
+    assert!(s.contains(r#"w:val="FootnoteReference""#));
 }
 
 #[test]
