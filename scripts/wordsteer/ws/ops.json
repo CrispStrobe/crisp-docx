@@ -1,0 +1,61 @@
+{
+  "$comment": "Single source of truth for the wordsteer step vocabulary (cf. ExcelLLMAddin shared/providers.json). Names and units follow quds tool/fidelity/office_steps.dart: lengths in points, lineSpacing as a multiple, colours as six hex digits. 'engines' lists who implements an op natively; tests/test_ops_spec.py fails when an engine adapter and this file disagree. 'write': true ops change the document (agents should confirm them, as ExcelLLMAddin's write tools do).",
+  "target": {
+    "find": "exact text inside one paragraph of the main story (case-sensitive)",
+    "occurrence": "1-based, counted in document order (default 1)",
+    "select": "instead of find: 'word' | 'sentence' | 'paragraph' | 'shortParagraph' — the recipe resolver picks a text that occurs exactly once in the input document",
+    "nth": "with select: which candidate (default 0; 'middle' picks the middle one)"
+  },
+  "ops": {
+    "runFormat": {
+      "write": true,
+      "params": {"bold": "bool", "italic": "bool", "strike": "bool", "underline": "single|double|none|…", "color": "hex", "highlight": "hex|none", "font": "string", "size": "points"},
+      "engines": ["word", "quds", "crisp"]
+    },
+    "paragraphFormat": {
+      "write": true,
+      "params": {"alignment": "left|center|right|both", "before": "points", "after": "points", "lineSpacing": "multiple", "left": "points", "right": "points", "firstLine": "points", "hanging": "points"},
+      "engines": ["word", "quds", "crisp"]
+    },
+    "replaceText": {
+      "write": true,
+      "params": {"text": "string"},
+      "engines": ["word", "quds", "crisp"]
+    },
+    "heading": {
+      "write": true,
+      "params": {"level": "0..9 (0 = Normal)"},
+      "engines": ["word", "quds", "crisp"]
+    },
+    "paragraphInsert": {
+      "write": true,
+      "params": {"text": "string (inserted as a new paragraph after the target's paragraph)"},
+      "engines": ["word", "quds", "crisp"]
+    },
+    "paragraphDelete": {
+      "write": true,
+      "params": {},
+      "engines": ["word", "quds", "crisp"]
+    },
+    "sectionFormat": {
+      "write": true,
+      "params": {"section": "0-based index", "top": "points", "bottom": "points", "left": "points", "right": "points", "width": "points", "height": "points"},
+      "engines": ["word", "quds", "crisp"]
+    },
+    "list": {
+      "write": true,
+      "params": {"numbered": "bool", "level": "int"},
+      "engines": ["word", "quds"]
+    },
+    "listClear": {
+      "write": true,
+      "params": {},
+      "engines": ["word", "quds"]
+    }
+  },
+  "conversions": {
+    "docx->doc": ["word"],
+    "doc->docx": ["word", "legacy"],
+    "docx->docx (open/save)": ["word", "quds", "crisp"]
+  }
+}

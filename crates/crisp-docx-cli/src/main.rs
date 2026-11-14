@@ -6,6 +6,9 @@
 //!   cure); optional textutil tag normalization.
 //! - `notes-kind` — convert footnotes to endnotes or back.
 //! - `inspect` — human-readable summary of a package.
+//! - `apply-steps` — run text-anchored editing steps (the wordsteer /
+//!   quds `office_steps` vocabulary) on the main story.
+//! - `paragraphs` — print the main-story paragraph texts used for addressing.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -13,10 +16,10 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use crisp_docx_core::{
-    analyze_blueprint, apply_heading_inferences, check_package, convert_notes_kind,
+    analyze_blueprint, apply_heading_inferences, apply_steps, check_package, convert_notes_kind,
     infer_heading_levels, inject_footnotes, normalize_quotes_in_package, normalize_tags, open,
-    save, strip_paragraph_bold, strip_rsids, transplant_body, NotesKind, QuoteOptions, QuoteStyle,
-    StyleIndex,
+    paragraph_texts, save, strip_paragraph_bold, strip_rsids, transplant_body, NotesKind,
+    ParagraphFormat, QuoteOptions, QuoteStyle, RunFormat, SectionFormat, Step, StyleIndex, Target,
 };
 
 #[derive(Parser)]
@@ -64,6 +67,27 @@ enum Cmd {
     /// Validate a docx — XML parse, rsid/paraId consistency, rel targets,
     /// body structure, bookmark IDs, inline rIds. Exits 1 on failure.
     Check(SingleFileArgs),
+
+    /// Apply editing steps from a JSON file (list of {"op": ...} objects).
+    ///
+    /// Ops: runFormat, paragraphFormat, replaceText, heading,
+    /// paragraphInsert, paragraphDelete, sectionFormat. Targets are
+    /// {"target": {"find": "text", "occurrence": 1}} or quds-style
+    /// {"paragraph": N, "start": S, "end": E}. Lengths in points.
+    ApplySteps(ApplyStepsArgs),
+
+    /// Print main-story paragraph texts as a JSON array.
+    Paragraphs(SingleFileArgs),
+}
+
+#[derive(clap::Args)]
+struct ApplyStepsArgs {
+    /// Input .docx.
+    input: PathBuf,
+    /// JSON file with a list of steps.
+    steps: PathBuf,
+    /// Output .docx (never edits the input in place).
+    output: PathBuf,
 }
 
 #[derive(clap::Args)]
@@ -228,6 +252,8 @@ fn main() -> Result<()> {
         Cmd::InferHeadings(args) => cmd_infer_headings(args),
         Cmd::Inspect(args) => cmd_inspect(args),
         Cmd::Check(args) => cmd_check(args),
+        Cmd::ApplySteps(args) => cmd_apply_steps(args),
+        Cmd::Paragraphs(args) => cmd_paragraphs(args),
     }
 }
 
@@ -459,4 +485,153 @@ fn cmd_inspect(args: InspectArgs) -> Result<()> {
         println!("  {name:55}  {} bytes", data.len());
     }
     Ok(())
+}
+
+fn cmd_paragraphs(args: SingleFileArgs) -> Result<()> {
+    let pkg = open(&args.input).with_context(|| format!("opening {}", args.input.display()))?;
+    println!("{}", serde_json::to_string_pretty(&paragraph_texts(&pkg)?)?);
+    Ok(())
+}
+
+fn cmd_apply_steps(args: ApplyStepsArgs) -> Result<()> {
+    let raw = std::fs::read_to_string(&args.steps)
+        .with_context(|| format!("reading {}", args.steps.display()))?;
+    let json: serde_json::Value = serde_json::from_str(&raw).context("steps file is not JSON")?;
+    let list = json
+        .as_array()
+        .context("steps file must contain a JSON list")?;
+    let steps = list
+        .iter()
+        .enumerate()
+        .map(|(i, v)| parse_step(v).with_context(|| format!("step {}", i + 1)))
+        .collect::<Result<Vec<_>>>()?;
+    let mut pkg = open(&args.input).with_context(|| format!("opening {}", args.input.display()))?;
+    let report = apply_steps(&mut pkg, &steps)?;
+    save(&pkg, &args.output).with_context(|| format!("writing {}", args.output.display()))?;
+    let resolved: Vec<serde_json::Value> = report
+        .resolved
+        .iter()
+        .map(|r| match r {
+            Some((p, s, e)) => serde_json::json!({"paragraph": p, "start": s, "end": e}),
+            None => serde_json::Value::Null,
+        })
+        .collect();
+    println!("{}", serde_json::json!({"ok": true, "resolved": resolved}));
+    Ok(())
+}
+
+const KNOWN_KEYS: &[&str] = &[
+    "op",
+    "target",
+    "paragraph",
+    "start",
+    "end",
+    "bold",
+    "italic",
+    "strike",
+    "underline",
+    "color",
+    "highlight",
+    "font",
+    "size",
+    "alignment",
+    "before",
+    "after",
+    "lineSpacing",
+    "left",
+    "right",
+    "firstLine",
+    "hanging",
+    "text",
+    "level",
+    "section",
+    "top",
+    "bottom",
+    "width",
+    "height",
+];
+
+fn parse_step(v: &serde_json::Value) -> Result<Step> {
+    let o = v.as_object().context("step must be an object")?;
+    for k in o.keys() {
+        anyhow::ensure!(KNOWN_KEYS.contains(&k.as_str()), "unknown field {k:?}");
+    }
+    let op = o
+        .get("op")
+        .and_then(|x| x.as_str())
+        .context("missing \"op\"")?;
+    let f = |k: &str| o.get(k).and_then(|x| x.as_f64());
+    let b = |k: &str| o.get(k).and_then(|x| x.as_bool());
+    let st = |k: &str| o.get(k).and_then(|x| x.as_str()).map(str::to_string);
+    let target = || -> Result<Target> {
+        if let Some(t) = o.get("target") {
+            let text = t
+                .get("find")
+                .and_then(|x| x.as_str())
+                .context("target.find missing")?;
+            let occurrence = t.get("occurrence").and_then(|x| x.as_u64()).unwrap_or(1) as usize;
+            anyhow::ensure!(occurrence >= 1, "occurrence is 1-based");
+            return Ok(Target::Find {
+                text: text.to_string(),
+                occurrence,
+            });
+        }
+        let paragraph = o
+            .get("paragraph")
+            .and_then(|x| x.as_u64())
+            .context("need target or paragraph")?;
+        let u = |k: &str| o.get(k).and_then(|x| x.as_u64()).map(|x| x as usize);
+        Ok(Target::Index {
+            paragraph: paragraph as usize,
+            start: u("start"),
+            end: u("end"),
+        })
+    };
+    Ok(match op {
+        "runFormat" => Step::RunFormat(
+            target()?,
+            RunFormat {
+                bold: b("bold"),
+                italic: b("italic"),
+                strike: b("strike"),
+                underline: st("underline"),
+                color: st("color"),
+                highlight: st("highlight"),
+                font: st("font"),
+                size: f("size"),
+            },
+        ),
+        "paragraphFormat" => Step::ParagraphFormat(
+            target()?,
+            ParagraphFormat {
+                alignment: st("alignment"),
+                before: f("before"),
+                after: f("after"),
+                line_spacing: f("lineSpacing"),
+                left: f("left"),
+                right: f("right"),
+                first_line: f("firstLine"),
+                hanging: f("hanging"),
+            },
+        ),
+        "replaceText" => Step::ReplaceText(target()?, st("text").context("missing text")?),
+        "heading" => Step::Heading(
+            target()?,
+            o.get("level")
+                .and_then(|x| x.as_u64())
+                .context("missing level")? as u8,
+        ),
+        "paragraphInsert" => Step::ParagraphInsert(target()?, st("text").context("missing text")?),
+        "paragraphDelete" => Step::ParagraphDelete(target()?),
+        "sectionFormat" => Step::SectionFormat(SectionFormat {
+            section: o.get("section").and_then(|x| x.as_u64()).unwrap_or(0) as usize,
+            top: f("top"),
+            bottom: f("bottom"),
+            left: f("left"),
+            right: f("right"),
+            width: f("width"),
+            height: f("height"),
+        }),
+        other => anyhow::bail!("op {other:?} is not implemented by crisp-docx"),
+    })
 }

@@ -57,6 +57,8 @@ Sister project to:
 | Style mapping | `style_mapper` | Multilingual heading classifier + blueprint-driven pStyle remapping. |
 | Heading inference | `heading_inference` | Detect H1/H2/H3 from font-size clusters when explicit styles aren't set. |
 | Strip cosmetic paragraph bold | `strip_paragraph_bold` | Remove whole-paragraph bold inherited from RTF→md conversion. |
+| Text-anchored editing steps | `steps` | `apply-steps`: format a word/sentence (runs split, rPr in schema order), paragraph layout, replace, Word-style heading apply, insert/delete paragraphs, section margins — the quds/Word-compatible vocabulary of [`scripts/wordsteer`](scripts/wordsteer). |
+| Lossless XML tree | `xml_tree` | Random-access edits that re-serialise untouched content byte-identically. |
 | Validity check | `check` | 7-axis cargo-clean diagnostic (XML parse, rsid, paraId, rels, body shape, bookmarks, rIds). |
 
 ## LLM provider matrix (`crisp-docx-llm`)

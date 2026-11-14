@@ -46,6 +46,10 @@ pub enum Error {
         source: quick_xml::Error,
     },
 
+    /// An editing step could not be resolved or applied.
+    #[error("{0}")]
+    Step(String),
+
     /// A bare I/O error not tied to a known path (e.g. from a writer).
     #[error("I/O: {0}")]
     Plain(#[from] std::io::Error),

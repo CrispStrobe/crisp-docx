@@ -3,6 +3,20 @@
 All notable changes land here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning: [SemVer](https://semver.org/).
 
+## Unreleased
+
+- core: `steps` — text-anchored editing steps on the main story
+  (`runFormat`, `paragraphFormat`, `replaceText`, `heading`,
+  `paragraphInsert`, `paragraphDelete`, `sectionFormat`). Runs are split at
+  character offsets, properties are inserted in CT_RPr/CT_PPr order, heading
+  apply mirrors Word (clears direct paragraph formatting and majority
+  character formatting; adds Word 365's built-in heading style if missing).
+- core: `xml_tree` — lossless random-access XML tree for surgical edits.
+- cli: `apply-steps IN STEPS.json OUT` and `paragraphs IN`.
+- scripts/wordsteer: one recipe vocabulary for Word (AppleScript), quds,
+  crisp-docx and the legacy .doc parser, plus corpus round-trip and task
+  audits with a semantic comparator.
+
 ## [Unreleased]
 
 Changes since v0.1.0 release tag — will roll into `0.1.1` or `0.2.0`

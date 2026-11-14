@@ -24,6 +24,7 @@
 pub mod error;
 pub mod ns;
 pub mod package;
+pub mod xml_tree;
 
 mod blueprint;
 mod check;
@@ -38,6 +39,7 @@ mod paragraph_runs;
 mod paragraph_text;
 mod quote_style;
 mod rsid_strip;
+mod steps;
 mod strip_paragraph_bold;
 mod style_classify;
 mod style_mapper;
@@ -62,6 +64,10 @@ pub use quote_style::{
     normalize_quotes, normalize_quotes_in_package, QuoteOptions, QuoteReport, QuoteStyle,
 };
 pub use rsid_strip::strip_rsids;
+pub use steps::{
+    apply_steps, paragraph_texts, ParagraphFormat, RunFormat, SectionFormat, Step, StepReport,
+    Target,
+};
 pub use strip_paragraph_bold::strip_paragraph_bold;
 pub use style_classify::{classify_style, SemanticClass, StyleClassification};
 pub use style_mapper::{apply_style_mapping, StyleIndex, StyleInfo, StyleMapper};

@@ -1,0 +1,25 @@
+{
+  "$comment": "Editing tasks replayed over a corpus by `wordsteer.py corpus tasks`. Each task is a recipe; selectors are resolved per document to a text that occurs exactly once. Units: points, lineSpacing multiple, hex colours.",
+  "tasks": [
+    {"id": "word-bold-italic-color", "description": "Reformat one word",
+     "steps": [{"op": "runFormat", "target": {"select": "word"}, "bold": true, "italic": true, "color": "C00000"}]},
+    {"id": "word-font-size", "description": "Change font and size of one word",
+     "steps": [{"op": "runFormat", "target": {"select": "word", "nth": 0}, "font": "Arial", "size": 15}]},
+    {"id": "sentence-underline-highlight", "description": "Reformat one sentence",
+     "steps": [{"op": "runFormat", "target": {"select": "sentence"}, "underline": "single", "highlight": "FFFF00", "strike": false}]},
+    {"id": "paragraph-layout", "description": "Center a paragraph, spacing 12/6, 1.5 lines, 36pt left indent",
+     "steps": [{"op": "paragraphFormat", "target": {"select": "paragraph"}, "alignment": "center", "before": 12, "after": 6, "lineSpacing": 1.5, "left": 36}]},
+    {"id": "paragraph-first-line", "description": "Justify with a first-line indent",
+     "steps": [{"op": "paragraphFormat", "target": {"select": "paragraph", "nth": 0}, "alignment": "both", "firstLine": 18}]},
+    {"id": "replace-word", "description": "Replace one word",
+     "steps": [{"op": "replaceText", "target": {"select": "word"}, "text": "ERSETZT"}]},
+    {"id": "heading-1", "description": "Turn a short paragraph into Heading 1",
+     "steps": [{"op": "heading", "target": {"select": "shortParagraph"}, "level": 1}]},
+    {"id": "insert-paragraph", "description": "Insert a paragraph after another",
+     "steps": [{"op": "paragraphInsert", "target": {"select": "paragraph"}, "text": "Eingefügter Absatz zur Prüfung."}]},
+    {"id": "delete-paragraph", "description": "Delete one paragraph",
+     "steps": [{"op": "paragraphDelete", "target": {"select": "paragraph"}}]},
+    {"id": "section-margins", "description": "Section 1 margins 50/50/70/60 pt",
+     "steps": [{"op": "sectionFormat", "section": 0, "top": 50, "bottom": 50, "left": 70, "right": 60}]}
+  ]
+}
