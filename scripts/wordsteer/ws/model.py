@@ -164,7 +164,9 @@ class Styles:
         self.default_p: Dict[str, object] = {}
         self.default_para_style: Optional[str] = None
         self.default_char_style: Optional[str] = None
-        if root is None:
+        self._cache_r: Dict[str, Dict[str, object]] = {}
+        self._cache_p: Dict[str, Dict[str, object]] = {}
+        if root is None:  # a package without styles.xml
             return
         dd = root.find(w("docDefaults"))
         if dd is not None:
@@ -184,8 +186,6 @@ class Styles:
                     self.default_para_style = sid
                 elif s.kind == "character":
                     self.default_char_style = sid
-        self._cache_r: Dict[str, Dict[str, object]] = {}
-        self._cache_p: Dict[str, Dict[str, object]] = {}
 
     def chain(self, sid: Optional[str]) -> List[Style]:
         out: List[Style] = []

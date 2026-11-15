@@ -73,6 +73,19 @@ BASE = ('<w:p><w:r><w:t xml:space="preserve">Plain and </w:t></w:r><w:r><w:rPr><
 
 
 class ModelTests(unittest.TestCase):
+    def test_package_without_styles_part(self):
+        # Text-only conversions (e.g. recovered legacy .doc text) have no
+        # styles.xml; style lookups used to crash on missing caches.
+        path = docx('<w:p><w:pPr><w:pStyle w:val="Missing"/></w:pPr>'
+                    '<w:r><w:t>Plain</w:t></w:r></w:p>')
+        with zipfile.ZipFile(path) as z:
+            parts = {n: z.read(n) for n in z.namelist() if n != "word/styles.xml"}
+        with zipfile.ZipFile(path, "w") as z:
+            for name, data in parts.items():
+                z.writestr(name, data)
+        m = load(path)
+        self.assertEqual([p.text for p in m.paragraphs], ["Plain"])
+
     def test_text_view_and_effective_formatting(self):
         m = load(docx(BASE))
         self.assertEqual([p.text for p in m.paragraphs],
