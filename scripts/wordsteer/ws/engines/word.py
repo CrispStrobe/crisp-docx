@@ -155,10 +155,20 @@ def _retrying(fn):
 LOCK = os.path.expanduser("~/.cache/wordsteer/word.lock")
 
 
+_HUNG = False  # circuit breaker: set after the first hang in this process
+
+
 def run(script: str, timeout: float = 180) -> str:
     """One osascript call, serialised across processes: Word's AppleScript
     bridge degrades (documents resolve to `missing value` until Word is
-    restarted) when several clients drive it concurrently."""
+    restarted) when several clients drive it concurrently.
+
+    After one hang every further call in this process fails at once: a hung
+    Word (modal dialog, Error Reporting) must be looked at by a person, and
+    retrying file after file only keeps it busy for hours."""
+    global _HUNG
+    if _HUNG:
+        raise WordHung("Word stopped responding earlier in this process; not retrying")
     import fcntl
     os.makedirs(os.path.dirname(LOCK), exist_ok=True)
     with open(LOCK, "w") as lock:
@@ -179,6 +189,8 @@ def _run_unlocked(script: str, timeout: float) -> str:
         res = subprocess.run(["osascript", "-"], input=_PRELUDE + script,
                              capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired as e:
+        global _HUNG
+        _HUNG = True
         raise WordHung(f"osascript timed out after {timeout}s") from e
     if res.returncode != 0:
         raise WordError(res.stderr.strip()[-400:])
