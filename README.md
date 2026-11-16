@@ -231,18 +231,7 @@ ported primitive side-by-side against the original Python implementation
 when both `CrispTranslator/` and a Python interpreter are available; CI
 auto-skips when they aren't.
 
-## Status
-
-| Phase | Goal | State |
-|---|---|---|
-| A | Pure-Rust OOXML primitives | ✅ |
-| B | Python wheel (PyO3 / maturin) | ✅ |
-| C | Cross-platform CLI | ✅ |
-| D | Word-level transformer alignment | ✅ |
-| E | LLM HTTP clients | ✅ (12 providers) |
-| F | Offline NMT (CrispASR) | ✅ |
-| G | End-to-end translate-cli | ✅ |
-| H | CrispSorter Tauri integration | ✅ |
+## Status / Development
 
 See [`PARITY.md`](./PARITY.md) for the Python ↔ Rust per-primitive
 status ledger, [`PLAN.md`](./PLAN.md) for the phased execution
