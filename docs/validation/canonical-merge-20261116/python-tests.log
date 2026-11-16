@@ -1,0 +1,20 @@
+test_identity (test_wordsteer.CompareNegativeControls.test_identity) ... ok
+test_lost_bold_is_reported (test_wordsteer.CompareNegativeControls.test_lost_bold_is_reported) ... ok
+test_lost_heading_style_is_reported (test_wordsteer.CompareNegativeControls.test_lost_heading_style_is_reported) ... ok
+test_lost_table_is_reported (test_wordsteer.CompareNegativeControls.test_lost_table_is_reported) ... ok
+test_text_change_is_reported (test_wordsteer.CompareNegativeControls.test_text_change_is_reported) ... ok
+test_list_indent_from_numbering_equals_direct_indent (test_wordsteer.ModelTests.test_list_indent_from_numbering_equals_direct_indent) ... ok
+test_package_without_styles_part (test_wordsteer.ModelTests.test_package_without_styles_part) ... ok
+test_text_view_and_effective_formatting (test_wordsteer.ModelTests.test_text_view_and_effective_formatting) ... ok
+test_bundled_recipes_validate (test_wordsteer.RecipeTests.test_bundled_recipes_validate) ... ok
+test_intent_oracle_detects_missing_change (test_wordsteer.RecipeTests.test_intent_oracle_detects_missing_change) ... ok
+test_selectors_pick_unique_text (test_wordsteer.RecipeTests.test_selectors_pick_unique_text) ... ok
+test_validate_rejects_unknown_fields (test_wordsteer.RecipeTests.test_validate_rejects_unknown_fields) ... ok
+test_crisp_cli_implements_declared_ops (test_wordsteer.SpecConsistency.test_crisp_cli_implements_declared_ops) ... ok
+test_quds_declares_every_spec_op (test_wordsteer.SpecConsistency.test_quds_declares_every_spec_op) ... ok
+test_word_adapter_matches_spec (test_wordsteer.SpecConsistency.test_word_adapter_matches_spec) ... ok
+
+----------------------------------------------------------------------
+Ran 15 tests in 0.363s
+
+OK

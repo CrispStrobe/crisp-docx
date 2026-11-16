@@ -1,0 +1,328 @@
+warning: `package.homepage` is redundant with `package.repository`
+ --> /private/tmp/CrispEmbed/crispembed/Cargo.toml:9:12
+  |
+8 | repository = "https://github.com/CrispStrobe/CrispEmbed"
+  |              -------------------------------------------
+9 | homepage = "https://github.com/CrispStrobe/CrispEmbed"
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `cargo::redundant_homepage` is set to `warn` by default
+help: consider removing `package.homepage`
+warning: `crispembed` (manifest) generated 1 warning
+warning: `package.homepage` is redundant with `package.repository`
+ --> /private/tmp/CrispASR/crispasr/Cargo.toml:8:12
+  |
+7 | repository = "https://github.com/CrispStrobe/CrispASR"
+  |              -----------------------------------------
+8 | homepage = "https://github.com/CrispStrobe/CrispASR"
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `cargo::redundant_homepage` is set to `warn` by default
+help: consider removing `package.homepage`
+warning: `crispasr` (manifest) generated 1 warning
+    Updating crates.io index
+     Locking 4 packages to highest compatible versions
+    Updating crispasr v0.8.6 (/private/tmp/CrispASR/crispasr) -> v0.8.51
+    Updating crispasr-sys v0.8.6 (/private/tmp/CrispASR/crispasr-sys) -> v0.8.51
+    Updating crispembed v0.4.0 (/private/tmp/CrispEmbed/crispembed) -> v0.17.17
+    Updating crispembed-sys v0.4.0 (/private/tmp/CrispEmbed/crispembed-sys) -> v0.17.17
+ Downloading crates ...
+  Downloaded adler2 v2.0.1
+  Downloaded anstyle-parse v1.0.0
+  Downloaded aho-corasick v1.1.4
+  Downloaded bumpalo v3.20.2
+  Downloaded clap_builder v4.6.0
+  Downloaded colorchoice v1.0.5
+  Downloaded equivalent v1.0.2
+  Downloaded heck v0.5.0
+  Downloaded itoa v1.0.18
+  Downloaded matchers v0.2.0
+  Downloaded nu-ansi-term v0.50.3
+  Downloaded proc-macro2 v1.0.106
+  Downloaded serde_core v1.0.228
+  Downloaded simd-adler32 v0.3.9
+  Downloaded regex-automata v0.4.14
+  Downloaded syn v2.0.117
+  Downloaded thiserror-impl v1.0.69
+  Downloaded tracing-log v0.2.0
+  Downloaded utf8parse v0.2.2
+  Downloaded zopfli v0.8.3
+  Downloaded tracing v0.1.44
+  Downloaded anstyle-query v1.1.5
+  Downloaded clap v4.6.1
+  Downloaded crc32fast v1.5.0
+  Downloaded lazy_static v1.5.0
+  Downloaded hashbrown v0.17.1
+  Downloaded miniz_oxide v0.8.9
+  Downloaded serde v1.0.228
+  Downloaded quick-xml v0.36.2
+  Downloaded smallvec v1.15.1
+  Downloaded thiserror v2.0.18
+  Downloaded tracing-attributes v0.1.31
+  Downloaded unicode-ident v1.0.24
+  Downloaded anstream v1.0.0
+  Downloaded cfg-if v1.0.4
+  Downloaded displaydoc v0.2.5
+  Downloaded flate2 v1.1.9
+  Downloaded once_cell v1.21.4
+  Downloaded strsim v0.11.1
+  Downloaded regex-syntax v0.8.10
+  Downloaded thread_local v1.1.9
+  Downloaded zip v2.4.2
+  Downloaded anyhow v1.0.102
+  Downloaded indexmap v2.14.0
+  Downloaded memchr v2.8.0
+  Downloaded serde_json v1.0.149
+  Downloaded thiserror-impl v2.0.18
+  Downloaded tracing-core v0.1.36
+  Downloaded clap_lex v1.1.0
+  Downloaded pin-project-lite v0.2.17
+  Downloaded anstyle v1.0.14
+  Downloaded thiserror v1.0.69
+  Downloaded log v0.4.29
+  Downloaded is_terminal_polyfill v1.70.2
+  Downloaded tracing-subscriber v0.3.23
+  Downloaded zmij v1.0.21
+  Downloaded clap_derive v4.6.1
+  Downloaded sharded-slab v0.1.7
+  Downloaded quote v1.0.45
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling cfg-if v1.0.4
+   Compiling crc32fast v1.5.0
+   Compiling serde_core v1.0.228
+   Compiling log v0.4.29
+   Compiling simd-adler32 v0.3.9
+   Compiling serde v1.0.228
+   Compiling memchr v2.8.0
+   Compiling thiserror v2.0.18
+   Compiling adler2 v2.0.1
+   Compiling miniz_oxide v0.8.9
+   Compiling thiserror v1.0.69
+   Compiling zmij v1.0.21
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.2
+   Compiling bumpalo v3.20.2
+   Compiling zip v2.4.2
+   Compiling anyhow v1.0.102
+   Compiling zopfli v0.8.3
+   Compiling serde_json v1.0.149
+   Compiling itoa v1.0.18
+   Compiling flate2 v1.1.9
+   Compiling syn v2.0.117
+   Compiling utf8parse v0.2.2
+   Compiling once_cell v1.21.4
+   Compiling anstyle-parse v1.0.0
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling tracing-core v0.1.36
+   Compiling anstyle-query v1.1.5
+   Compiling anstyle v1.0.14
+   Compiling regex-syntax v0.8.10
+   Compiling anstream v1.0.0
+   Compiling indexmap v2.14.0
+   Compiling lazy_static v1.5.0
+   Compiling pin-project-lite v0.2.17
+   Compiling heck v0.5.0
+   Compiling strsim v0.11.1
+   Compiling clap_lex v1.1.0
+   Compiling sharded-slab v0.1.7
+   Compiling clap_builder v4.6.0
+   Compiling tracing-log v0.2.0
+   Compiling thread_local v1.1.9
+   Compiling smallvec v1.15.1
+   Compiling nu-ansi-term v0.50.3
+   Compiling regex-automata v0.4.14
+   Compiling quick-xml v0.36.2
+   Compiling matchers v0.2.0
+   Compiling thiserror-impl v2.0.18
+   Compiling thiserror-impl v1.0.69
+   Compiling displaydoc v0.2.5
+   Compiling tracing-attributes v0.1.31
+   Compiling clap_derive v4.6.1
+   Compiling tracing v0.1.44
+   Compiling tracing-subscriber v0.3.23
+   Compiling clap v4.6.1
+   Compiling crisp-docx-core v0.1.0 (/private/tmp/crispcloud-docx-canonical-20261116/crates/crisp-docx-core)
+   Compiling crisp-docx-cli v0.1.0 (/private/tmp/crispcloud-docx-canonical-20261116/crates/crisp-docx-cli)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.28s
+     Running unittests src/main.rs (target/debug/build/crisp-docx-cli/2a4559b06a2ba047/out/crisp_docx-2a4559b06a2ba047)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/build/crisp-docx-core/edfa31027e7d7d86/out/crisp_docx_core-edfa31027e7d7d86)
+
+running 118 tests
+test blueprint::tests::detects_landscape_orientation ... ok
+test blueprint::tests::parses_letter_size_section ... ok
+test blueprint::tests::reads_doc_defaults_font_and_size ... ok
+test blueprint::tests::falls_back_to_normal_style_rpr ... ok
+test check::tests::resolve_relative_target_basic ... ok
+test clean_runs::tests::preserves_footnote_text_run_marker_verbatim ... ok
+test check::tests::check_vielfalt_doc_is_clean ... ok
+test clean_runs::tests::keep_set_matches_python_format_transplant ... ok
+test clean_runs::tests::empty_rpr_is_left_alone ... ok
+test clean_runs::tests::preserves_footnote_reference_run_verbatim ... ok
+test footnote_format::tests::empty_pkg_returns_default ... ok
+test clean_runs::tests::run_without_rpr_is_left_alone ... ok
+test footnote_format::tests::apply_replaces_marker_rpr ... ok
+test heading_inference::tests::clusters_distinct_sizes_into_levels ... ok
+test clean_runs::tests::strips_fonts_sizes_colors_lang_rstyle ... ok
+test footnote_format::tests::extracts_rpr_and_tab_separator ... ok
+test blueprint::tests::analyze_combines_all_slices ... ok
+test footnote_format::tests::skips_id_zero_and_negative ... ok
+test heading_inference::tests::detects_single_bold_short_paragraph_as_level_1 ... ok
+test heading_inference::tests::no_candidates_when_nothing_is_bold ... ok
+test heading_inference::tests::ppr_default_bold_propagates_to_runs_without_explicit_bold ... ok
+test heading_inference::tests::skips_long_text_even_if_bold ... ok
+test heading_inference::tests::skips_paragraphs_with_existing_heading_pstyle ... ok
+test inline_md::tests::bare_url_drops_trailing_period ... ok
+test inline_md::tests::escaped_asterisk ... ok
+test inline_md::tests::explicit_link ... ok
+test inline_md::tests::bold_italic_triple ... ok
+test inline_md::tests::intraword_h_is_not_a_url ... ok
+test normalize_tags::tests::replace_in_place_multiple ... ok
+test inline_md::tests::italic_and_bold ... ok
+test inline_md::tests::italic_link_label ... ok
+test inline_md::tests::plain_text_is_one_span ... ok
+test inline_md::tests::underscores_are_literal ... ok
+test normalize_tags::tests::replace_in_place_basic ... ok
+test normalize_tags::tests::replace_in_place_no_match ... ok
+test note_injection::tests::find_first_marker_basic ... ok
+test note_injection::tests::find_first_marker_skips_unknown_and_non_digits ... ok
+test note_injection::tests::marker_len_works ... ok
+test notes_kind::tests::replace_all_growing ... ok
+test notes_kind::tests::replace_all_same_length ... ok
+test notes_kind::tests::replace_all_shrinking ... ok
+test package::tests::rejects_non_opc_zip ... ok
+test package::tests::loads_and_round_trips ... ok
+test package::tests::set_and_rename_part ... ok
+test paragraph_runs::tests::extracts_run_with_rpr ... ok
+test paragraph_runs::tests::extracts_ppr_and_footnote_ref ... ok
+test paragraph_runs::tests::extracts_single_run_paragraph ... ok
+test paragraph_text::tests::concatenates_split_runs_into_single_text ... ok
+test paragraph_runs::tests::round_trips_complex_paragraph ... ok
+test paragraph_runs::tests::extracts_mixed_runs_in_order ... ok
+test paragraph_runs::tests::multiple_paragraphs_round_trip ... ok
+test paragraph_text::tests::replace_preserves_footnote_references ... ok
+test paragraph_runs::tests::replace_fewer_paragraphs_passes_through_extras ... ok
+test paragraph_runs::tests::replace_swaps_runs ... ok
+test paragraph_text::tests::extracts_multiple_paragraphs_in_order ... ok
+test quote_style::tests::apostrophe_is_preserved_not_a_quote ... ok
+test quote_style::tests::close_at_fragment_start_uses_threaded_context ... ok
+test quote_style::tests::french_to_swiss_strips_spacing ... ok
+test paragraph_text::tests::replace_swaps_paragraph_text ... ok
+test paragraph_text::tests::replace_preserves_paragraph_style_via_ppr ... ok
+test quote_style::tests::english_curly_to_german ... ok
+test quote_style::tests::french_to_german_guillemets_flips_and_strips ... ok
+test paragraph_text::tests::extracts_single_paragraph_text ... ok
+test quote_style::tests::german_to_english ... ok
+test quote_style::tests::nested_single_inside_double ... ok
+test quote_style::tests::singles_can_be_skipped ... ok
+test quote_style::tests::straight_doubles_to_german ... ok
+test quote_style::tests::to_german_guillemets_points_inward ... ok
+test quote_style::tests::to_french_adds_inner_narrow_space ... ok
+test rsid_strip::tests::strips_known_rsid_attrs ... ok
+test steps::tests::bold_one_word_across_a_run_boundary_splits_runs_and_keeps_rest ... ok
+test paragraph_text::tests::tabs_and_breaks_become_special_chars ... ok
+test steps::tests::errors_leave_package_unchanged ... ok
+test rsid_strip::tests::noop_when_nothing_to_strip ... ok
+test steps::tests::field_codes_are_invisible_and_field_results_editable ... ok
+test steps::tests::heading_adds_word_style_when_missing ... ok
+test steps::tests::highlight_maps_palette_or_falls_back_to_shading ... ok
+test steps::tests::heading_clears_direct_paragraph_and_majority_char_formatting ... ok
+test steps::tests::list_clear_suppresses_style_numbering_with_num_id_zero ... ok
+test steps::tests::paragraph_format_inserts_in_schema_order ... ok
+test steps::tests::insert_and_delete_paragraphs ... ok
+test strip_paragraph_bold::tests::handles_explicit_bold_off ... ok
+test strip_paragraph_bold::tests::ignores_empty_paragraphs ... ok
+test strip_paragraph_bold::tests::multiple_paragraphs_handled_independently ... ok
+test steps::tests::replace_text_spanning_runs_keeps_first_run_formatting ... ok
+test steps::tests::text_view_matches_word_main_story ... ok
+test steps::tests::section_margins_in_points ... ok
+test strip_paragraph_bold::tests::leaves_partial_bold_alone ... ok
+test steps::tests::untouched_package_roundtrips_byte_identically ... ok
+test style_classify::tests::abstract_class ... ok
+test strip_paragraph_bold::tests::strips_whole_paragraph_bold ... ok
+test style_classify::tests::blockquote ... ok
+test style_classify::tests::caption ... ok
+test style_classify::tests::body_class ... ok
+test style_classify::tests::heading_regex_with_separators_and_zeros ... ok
+test style_classify::tests::english_heading_levels ... ok
+test style_classify::tests::footnote ... ok
+test style_classify::tests::multilingual_headings ... ok
+test style_classify::tests::title ... ok
+test style_classify::tests::unknown ... ok
+test steps::tests::list_creates_numbering_part_and_clear_removes_it ... ok
+test style_mapper::tests::exact_name_match_for_non_heading ... ok
+test style_mapper::tests::case_insensitive_match ... ok
+test style_mapper::tests::fallback_uses_first_para_style_when_no_normal ... ok
+test style_mapper::tests::heading_falls_back_to_adjacent_level ... ok
+test style_mapper::tests::fallback_to_body_when_no_match ... ok
+test style_mapper::tests::heading_reclassification_uses_blueprint_heading ... ok
+test style_mapper::tests::outline_level_drives_heading_assignments ... ok
+test style_mapper::tests::user_override_ignored_if_target_missing ... ok
+test style_mapper::tests::parses_styles_xml ... ok
+test style_mapper::tests::semantic_class_fills_gaps ... ok
+test style_mapper::tests::user_override_wins_if_target_exists ... ok
+test transplant::tests::extract_source_body_strips_sectpr ... ok
+test transplant::tests::extract_blueprint_frame_finds_sectpr ... ok
+test transplant::tests::missing_body_returns_none ... ok
+test transplant::tests::next_rid_picks_next_available ... ok
+test xml_tree::tests::roundtrip_is_lossless_for_untouched_content ... ok
+test xml_tree::tests::unescape_handles_entities ... ok
+
+test result: ok. 118 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+     Running tests/integration.rs (target/debug/build/crisp-docx-core/7f5ffb19c8ba4e10/out/integration-7f5ffb19c8ba4e10)
+
+running 13 tests
+test round_trip_preserves_byte_identity ... ok
+test inject_footnotes_creates_part_and_rewrites_runs ... ok
+test inject_footnotes_reports_unknown_and_unused ... ok
+test convert_noop_when_already_target ... ok
+test normalize_tags_end_to_end ... ok
+test convert_endnotes_back_to_footnotes_is_reversible ... ok
+test strip_rsids_idempotent ... ok
+test convert_footnotes_to_endnotes_end_to_end ... ok
+test strip_rsids_end_to_end ... ok
+test save_then_open_round_trips_to_byte_equivalent_content ... ok
+test transplant_swaps_body_and_preserves_blueprint_sectpr ... ok
+test transplant_strips_rsids_from_grafted_runs ... ok
+test transplant_remaps_styleids_when_blueprint_uses_different_ids ... ok
+
+test result: ok. 13 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+     Running tests/live.rs (target/debug/build/crisp-docx-core/2ccaef409f9a6508/out/live-2ccaef409f9a6508)
+
+running 5 tests
+test live_clean_round_trip ... ok
+test live_inject_footnotes_smoke ... ok
+test live_inspect_only ... ok
+test live_notes_kind_round_trip ... ok
+test live_transplant_round_trip ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/parity.rs (target/debug/build/crisp-docx-core/eb4997578f333caa/out/parity-eb4997578f333caa)
+
+running 6 tests
+test parity_notes_to_endnotes ... ok
+test parity_check_package ... ok
+test parity_strip_rsids ... ok
+test parity_normalize_tags ... ok
+test parity_clean_runs ... ok
+test parity_classify_style ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests crisp_docx_core
+
+running 1 test
+test crates/crisp-docx-core/src/lib.rs - (line 11) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
